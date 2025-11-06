@@ -632,6 +632,7 @@ app.delete('/api/lancamento/:id', authMiddleware, async (req, res) => { //
     }
 });
 
+console.log('--- DEPLOY FORÇADO v3 (IPv4 fix) ---');
 
 // Inicia o servidor
 app.listen(PORT, () => {
