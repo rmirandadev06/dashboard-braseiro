@@ -1,25 +1,14 @@
-// /backend/db.js
-
 const knex = require('knex');
-const { parse } = require('pg-connection-string');
 
-const connectionString = process.env.DATABASE_URL || 'postgresql://postgres:Prj@2025@db.otdtqyleaxeqawwgjwkl.supabase.co:5432/postgres';
+// ▼▼▼ COLE A NOVA STRING (COM PORTA 6543) AQUI ▼▼▼
+const NOVA_STRING_DO_POOLER = 'postgresql://postgres.otdtqyleaxeqawwgjwkl:Prj@2025@aws-1-sa-east-1.pooler.supabase.com:6543/postgres';
 
-const connectionConfig = parse(connectionString);
+const connectionString = process.env.DATABASE_URL || NOVA_STRING_DO_POOLER;
 
-// CORREÇÃO ALTERNATIVA:
-// Em vez de forçar 'family', vamos forçar o 'host'
-// Isso faz o Node.js resolver o IPv4 do host antes de tentar conectar.
 const dbConfig = {
   client: 'pg',
-  connection: {
-    host: connectionConfig.host,
-    port: connectionConfig.port,
-    user: connectionConfig.user,
-    password: connectionConfig.password,
-    database: connectionConfig.database,
-    ssl: { rejectUnauthorized: false }
-  }
+  connection: connectionString,
+  ssl: { rejectUnauthorized: false }
 };
 
 const connection = knex(dbConfig);
