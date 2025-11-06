@@ -26,7 +26,7 @@
  * VARIÁVEIS GLOBAIS
  * ========================================
  */
-const API_URL = 'http://localhost:3001/api';
+const API_URL = 'https://dashboard-braseiro-api.onrender.com/api';
 let cashFlowChart;
 let expensesChart;
 let currentEditingId = null;
