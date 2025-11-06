@@ -1,0 +1,7 @@
+# Ignora todas as pastas node_modules
+node_modules/
+
+# Ignora arquivos de variáveis de ambiente locais
+.env
+*.log
+.DS_Store
