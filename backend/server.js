@@ -60,11 +60,12 @@ function calcularIntervaloDatas(periodo, customInicio, customFim) { //
     };
 }
 const categoriaMap = { //
-    'sales': 'Vendas (Salão)', 'extra': 'Recebíveis Extras',
-    'market': 'Mercado', 'purchases': 'Compras', 'staff': 'Pessoal',
-    'utilities': 'Utilidades', 'maintenance': 'Manutenção', 'taxes': 'Impostos', 
-    'investments': 'Investimentos', 'butchery': 'Açougue', 'bills': 'Contas/Boletos',
-    'other': 'Outros'
+    'sales': 'Vendas (Salão)', 'extra': 'Recebíveis Extras',
+    'market': 'Mercado', 'purchases': 'Compras', 'staff': 'Pessoal',
+    'utilities': 'Utilidades', 'maintenance': 'Manutenção', 'taxes': 'Impostos', 
+    'investments': 'Investimentos', 'butchery': 'Açougue', 'bills': 'Contas/Boletos',
+    'salary': 'Pagamento Salário', 'voucher': 'Pagamento Vale', 'fuel': 'Combustível',
+    'other': 'Outros'
 };
 const metodoMap = { //
     'cash': 'Dinheiro', 'card': 'Cartão', 'pix': 'Pix', 'transfer': 'Transferência', 

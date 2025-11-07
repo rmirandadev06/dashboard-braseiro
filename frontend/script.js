@@ -364,6 +364,7 @@ function abrirModalParaEditar(lancamento) {
         'Mercado': 'market', 'Compras': 'purchases', 'Pessoal': 'staff',
         'Utilidades': 'utilities', 'Manutenção': 'maintenance', 'Impostos': 'taxes',
         'Investimentos': 'investments', 'Açougue': 'butchery', 'Contas/Boletos': 'bills',
+        'Pagamento Salário': 'salary', 'Pagamento Vale': 'voucher', 'Combustível': 'fuel',
         'Outros': 'other'
     };
     
