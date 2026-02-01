@@ -148,8 +148,8 @@ function startApp() {
     const filtroPeriodo = document.getElementById('filtro-periodo');
     if(filtroPeriodo) {
         filtroPeriodo.onchange = (e) => {
-            const custom = document.querySelector('.custom-dates');
-            if(custom) custom.style.display = e.target.value === 'custom' ? 'flex' : 'none';
+            const displayMode = e.target.value === 'custom' ? 'flex' : 'none';
+            document.querySelectorAll('.custom-dates').forEach(el => el.style.display = displayMode);
         };
     }
 
