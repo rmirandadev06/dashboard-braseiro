@@ -184,37 +184,84 @@ async function fetchAPI(url, opts = {}) {
 }
 
 // --- EXPORT PDF ---
+// --- FUNÇÃO EXPORTAR PDF (BUSCA TUDO DO BANCO) ---
 async function exportPDF() {
-    const { jsPDF } = window.jspdf; const doc = new jsPDF(); 
-    const primaryColor = [44, 62, 80]; const greenColor = [46, 204, 113]; const redColor = [231, 76, 60];      
+    notify("Gerando PDF completo... Aguarde.", "info");
+
+    // 1. Prepara a busca COMPLETA (igual ao CSV)
+    const elPeriodo = document.getElementById('filtro-periodo');
+    const params = new URLSearchParams({
+        periodo: elPeriodo.value,
+        tipo: document.getElementById('filter-tipo').value,
+        categoria: document.getElementById('category').value,
+        metodoPagamento: document.getElementById('payment-method').value,
+        descricao: document.getElementById('filter-descricao').value,
+        valorMin: document.getElementById('filter-valor-min').value,
+        valorMax: document.getElementById('filter-valor-max').value,
+        page: 1,
+        limit: 100000 // TRUQUE: Pede tudo para o servidor
+    });
+
+    if(params.get('periodo') === 'custom') {
+        params.append('dataInicio', document.getElementById('start-date').value);
+        params.append('dataFim', document.getElementById('end-date').value);
+    }
+
+    // 2. Busca os dados no servidor
+    const res = await fetchAPI(`/dados-dashboard?${params}`);
+    if (!res) return;
+    const data = await res.json();
+
+    // 3. Inicia o PDF
+    const { jsPDF } = window.jspdf; 
+    const doc = new jsPDF(); 
+    const primaryColor = [44, 62, 80]; 
+    const greenColor = [46, 204, 113]; 
+    const redColor = [231, 76, 60];      
+    
+    // --- CABEÇALHO E LOGO ---
     const logoImg = document.getElementById('footer-logo');
     let startY = 15;
     if (logoImg && logoImg.complete) {
         try {
-            const canvas = document.createElement("canvas"); canvas.width = logoImg.naturalWidth; canvas.height = logoImg.naturalHeight;
-            const ctx = canvas.getContext("2d"); ctx.drawImage(logoImg, 0, 0); const logoData = canvas.toDataURL("image/png");
+            const canvas = document.createElement("canvas"); 
+            canvas.width = logoImg.naturalWidth; 
+            canvas.height = logoImg.naturalHeight;
+            const ctx = canvas.getContext("2d"); 
+            ctx.drawImage(logoImg, 0, 0); 
+            const logoData = canvas.toDataURL("image/png");
             doc.addImage(logoData, 'PNG', 14, 10, 30, (logoImg.naturalHeight * 30) / logoImg.naturalWidth);
+            
             doc.setFontSize(22); doc.setTextColor(...primaryColor); doc.text("Relatório Financeiro", 50, 20);
             doc.setFontSize(14); doc.text("Braseiro Grill", 50, 28);
             doc.setFontSize(10); doc.setTextColor(100); doc.text(`Gerado em: ${new Date().toLocaleString('pt-BR')}`, 50, 35);
             startY = 45;
-        } catch (e) { doc.setFontSize(22); doc.text("Relatório", 14, 20); startY = 40; }
-    } else { doc.setFontSize(22); doc.setTextColor(...primaryColor); doc.text("Relatório", 14, 20); startY = 40; }
+        } catch (e) { 
+            doc.setFontSize(22); doc.text("Relatório", 14, 20); startY = 40; 
+        }
+    } else { 
+        doc.setFontSize(22); doc.setTextColor(...primaryColor); doc.text("Relatório", 14, 20); startY = 40; 
+    }
 
     let finalY = startY;
-    const totalEnt = document.getElementById('kpi-entradas')?.innerText || "0";
-    const totalSai = document.getElementById('kpi-saidas')?.innerText || "0";
-    const saldo = document.getElementById('kpi-saldo-periodo')?.innerText || "0";
 
-    doc.setFontSize(12); doc.setTextColor(0); doc.text(`Resumo do Período:`, 14, finalY);
-    doc.setFontSize(10); doc.setTextColor(...greenColor); doc.text(`Entradas: ${totalEnt}`, 14, finalY + 6);
-    doc.setTextColor(...redColor); doc.text(`Saídas: ${totalSai}`, 70, finalY + 6);
-    doc.setTextColor(...primaryColor); doc.text(`Saldo: ${saldo}`, 130, finalY + 6);
+    // --- RESUMO (KPIS) ---
+    // Usamos os dados vindos do servidor para garantir precisão
+    const fmt = v => Number(v).toLocaleString('pt-BR', {style:'currency', currency:'BRL'});
+    
+    doc.setFontSize(12); doc.setTextColor(0); doc.text(`Resumo do Período Selecionado:`, 14, finalY);
+    doc.setFontSize(10); 
+    doc.setTextColor(...greenColor); doc.text(`Entradas: ${fmt(data.kpis.totalEntradas)}`, 14, finalY + 6);
+    doc.setTextColor(...redColor); doc.text(`Saídas: ${fmt(data.kpis.totalSaidas)}`, 80, finalY + 6);
+    doc.setTextColor(...primaryColor); doc.text(`Saldo: ${fmt(data.kpis.saldoPeriodo)}`, 140, finalY + 6);
     finalY += 15;
 
+    // --- GRÁFICOS (CAPTURA DA TELA) ---
+    // Gráficos precisam ser capturados da tela pois são canvas
     const getSharpImage = (chartInstance) => {
         if (!chartInstance) return null;
         const canvas = chartInstance.canvas; const w = canvas.width; const h = canvas.height;
+        // Aumenta resolução para o PDF não ficar borrado
         canvas.width = w * 4; canvas.height = h * 4;
         const anim = chartInstance.options.animation; chartInstance.options.animation = false; chartInstance.resize(); 
         const imgData = canvas.toDataURL('image/png', 1.0);
@@ -223,26 +270,73 @@ async function exportPDF() {
     };
 
     if (chart1 && chart2) {
-        const imgFluxo = getSharpImage(chart1); const imgDesp = getSharpImage(chart2);
-        if(imgFluxo) { doc.setFontSize(12); doc.setTextColor(0); doc.text("Fluxo de Caixa", 14, finalY); doc.addImage(imgFluxo, 'PNG', 14, finalY + 2, 180, 70); finalY += 80; }
+        const imgFluxo = getSharpImage(chart1); 
+        const imgDesp = getSharpImage(chart2);
+        
+        if(imgFluxo) { 
+            doc.setFontSize(12); doc.setTextColor(0); doc.text("Fluxo de Caixa", 14, finalY); 
+            doc.addImage(imgFluxo, 'PNG', 14, finalY + 2, 180, 70); 
+            finalY += 80; 
+        }
+        
         if (finalY > 180) { doc.addPage(); finalY = 20; }
-        if(imgDesp) { doc.text("Despesas por Categoria", 14, finalY); doc.addImage(imgDesp, 'PNG', 14, finalY + 2, 180, 70); finalY += 80; }
+        
+        if(imgDesp) { 
+            doc.text("Despesas por Categoria", 14, finalY); 
+            doc.addImage(imgDesp, 'PNG', 14, finalY + 2, 180, 70); 
+            finalY += 80; 
+        }
     }
 
-    const getTableData = (tableId) => {
-        const table = document.getElementById(tableId); if(!table) return []; const rows = [];
-        table.querySelectorAll('tr').forEach(tr => { const rowData = []; tr.querySelectorAll('td').forEach((td, index) => { if (index < 4) rowData.push(td.innerText); }); if (rowData.length > 0) rows.push(rowData); });
-        return rows;
-    };
-
+    // --- TABELAS (DOS DADOS COMPLETOS) ---
     if (finalY > 220) { doc.addPage(); finalY = 20; } else finalY += 10;
-    const entradasData = getTableData('tb-entradas');
-    if (entradasData.length > 0) { doc.setFontSize(14); doc.setTextColor(...greenColor); doc.text("Entradas", 14, finalY); doc.autoTable({ startY: finalY + 5, head: [['Data', 'Descrição', 'Categoria', 'Valor']], body: entradasData, theme: 'grid', headStyles: { fillColor: greenColor }, styles: { fontSize: 9 }, columnStyles: { 3: { halign: 'right', fontStyle: 'bold' } } }); finalY = doc.lastAutoTable.finalY + 15; }
-    
-    const saidasData = getTableData('tb-saidas');
-    if (saidasData.length > 0) { if (finalY > 250) { doc.addPage(); finalY = 20; } doc.setFontSize(14); doc.setTextColor(...redColor); doc.text("Saídas", 14, finalY); doc.autoTable({ startY: finalY + 5, head: [['Data', 'Descrição', 'Categoria', 'Valor']], body: saidasData, theme: 'grid', headStyles: { fillColor: redColor }, styles: { fontSize: 9 }, columnStyles: { 3: { halign: 'right', fontStyle: 'bold' } } }); }
 
-    doc.save(`relatorio_braseiro_${new Date().toISOString().split('T')[0]}.pdf`);
+    // Prepara os arrays de Entradas
+    const rowsEntradas = (data.tabelas?.ultimasEntradas || []).map(t => [
+        t.data_tabela,
+        t.descricao,
+        t.categoria,
+        fmt(t.valor)
+    ]);
+
+    if (rowsEntradas.length > 0) { 
+        doc.setFontSize(14); doc.setTextColor(...greenColor); doc.text("Detalhamento de Entradas", 14, finalY); 
+        doc.autoTable({ 
+            startY: finalY + 5, 
+            head: [['Data', 'Descrição', 'Categoria', 'Valor']], 
+            body: rowsEntradas, 
+            theme: 'grid', 
+            headStyles: { fillColor: greenColor }, 
+            styles: { fontSize: 9 }, 
+            columnStyles: { 3: { halign: 'right', fontStyle: 'bold' } } 
+        }); 
+        finalY = doc.lastAutoTable.finalY + 15; 
+    }
+    
+    // Prepara os arrays de Saídas
+    const rowsSaidas = (data.tabelas?.ultimasSaidas || []).map(t => [
+        t.data_tabela,
+        t.descricao,
+        t.categoria,
+        fmt(t.valor)
+    ]);
+
+    if (rowsSaidas.length > 0) { 
+        if (finalY > 250) { doc.addPage(); finalY = 20; } 
+        doc.setFontSize(14); doc.setTextColor(...redColor); doc.text("Detalhamento de Saídas", 14, finalY); 
+        doc.autoTable({ 
+            startY: finalY + 5, 
+            head: [['Data', 'Descrição', 'Categoria', 'Valor']], 
+            body: rowsSaidas, 
+            theme: 'grid', 
+            headStyles: { fillColor: redColor }, 
+            styles: { fontSize: 9 }, 
+            columnStyles: { 3: { halign: 'right', fontStyle: 'bold' } } 
+        }); 
+    }
+
+    doc.save(`Relatorio_Braseiro_${new Date().toISOString().split('T')[0]}.pdf`);
+    notify("PDF Completo gerado com sucesso!");
 }
 
 // --- MULTI-PAGAMENTO ---
