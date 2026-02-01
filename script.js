@@ -502,13 +502,57 @@ async function saveEditUser(e) {
     notify('Usuário atualizado'); loadUsers();
 }
 
-// --- FUNÇÃO EXPORTAR CSV (ATUALIZADA) ---
-function exportCSV() {
-    const dataToExport = Object.values(lancamentosCache);
-    if (dataToExport.length === 0) { notify("Nenhum dado na tela para exportar.", "error"); return; }
+// --- FUNÇÃO DE EXPORTAR EXCEL (BUSCA TUDO DO BANCO) ---
+async function exportCSV() {
+    // 1. Avisa o usuário que iniciou (pode demorar 1 segundinho)
+    notify("Gerando relatório completo...", "info");
 
+    // 2. Coleta os filtros que estão na tela agora
+    const elPeriodo = document.getElementById('filtro-periodo');
+    const params = new URLSearchParams({
+        periodo: elPeriodo.value,
+        tipo: document.getElementById('filter-tipo').value,
+        categoria: document.getElementById('category').value,
+        metodoPagamento: document.getElementById('payment-method').value,
+        descricao: document.getElementById('filter-descricao').value,
+        valorMin: document.getElementById('filter-valor-min').value,
+        valorMax: document.getElementById('filter-valor-max').value,
+        page: 1,       // Começa da primeira página
+        limit: 100000  // TRUQUE: Pede um limite gigante para vir TUDO de uma vez
+    });
+
+    // Se for data personalizada, adiciona no pedido
+    if(params.get('periodo') === 'custom') {
+        params.append('dataInicio', document.getElementById('start-date').value);
+        params.append('dataFim', document.getElementById('end-date').value);
+    }
+
+    // 3. Busca os dados no servidor (agora sim, a lista completa!)
+    const res = await fetchAPI(`/dados-dashboard?${params}`);
+    if (!res) return;
+    const data = await res.json();
+
+    // O servidor devolve Entradas e Saídas separados. Vamos juntar tudo.
+    const listaEntradas = data.tabelas?.ultimasEntradas || [];
+    const listaSaidas = data.tabelas?.ultimasSaidas || [];
+    const listaCompleta = [...listaEntradas, ...listaSaidas];
+
+    if (listaCompleta.length === 0) {
+        notify("Nenhum dado encontrado para este período.", "error");
+        return;
+    }
+
+    // Opcional: Ordenar por data (para ficar bonito no Excel)
+    listaCompleta.sort((a, b) => {
+        // Converte data pt-BR de volta para objeto Date para ordenar
+        const d1 = a.data ? new Date(a.data) : new Date();
+        const d2 = b.data ? new Date(b.data) : new Date();
+        return d1 - d2;
+    });
+
+    // 4. Monta o Arquivo (igual fizemos antes, mas agora com a lista completa)
     const headers = ["ID", "Data", "Tipo", "Descrição", "Categoria", "Forma de Pagamento", "Valor (R$)"];
-    const rows = dataToExport.map(t => {
+    const rows = listaCompleta.map(t => {
         const valorFormatado = parseFloat(t.valor).toFixed(2).replace('.', ',');
         return [
             t.id,
@@ -526,11 +570,15 @@ function exportCSV() {
     const url = window.URL.createObjectURL(blob);
     const link = document.createElement("a");
     const dateStr = new Date().toLocaleDateString('pt-BR').replace(/\//g, '-');
+    
     link.setAttribute("href", url);
-    link.setAttribute("download", `Relatorio_Braseiro_${dateStr}.csv`);
+    link.setAttribute("download", `Relatorio_Completo_${dateStr}.csv`);
+    
     document.body.appendChild(link);
     link.click();
     document.body.removeChild(link);
+    
+    notify("Download iniciado!");
 }
 
 function initCharts() { if(typeof Chart === 'undefined') console.error('Chart.js missing'); }
