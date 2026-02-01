@@ -1,6 +1,11 @@
-// Se estiver no PC (localhost), usa a porta 3001. Se estiver online (Render), usa o caminho relativo.
+// --- CONFIGURAÇÃO DE CONEXÃO ---
+// Troque o link abaixo pelo link do seu serviço NODE no Render (sem a barra / no final)
+const RENDER_URL = 'https://dashboard-braseiro-api.onrender.com'; 
+
 const isLocal = window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1';
-const API_URL = isLocal ? 'http://localhost:3001/api' : '/api';
+
+// Se for local, usa localhost:3001. Se for online, usa o link do Render + /api
+const API_URL = isLocal ? 'http://localhost:3001/api' : `${RENDER_URL}/api`;
 
 // --- AUTH & INIT ---
 const token = localStorage.getItem('authToken');
