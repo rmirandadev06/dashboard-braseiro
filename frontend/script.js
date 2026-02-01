@@ -1,1254 +1,542 @@
-/* * ========================================
- * AUTH GUARD (VERIFICAÇÃO DE LOGIN)
- * ========================================
- */
-(function() {
-    const token = localStorage.getItem('authToken');
-    const usuario = localStorage.getItem('usuario');
-    
-    if (!token || !usuario) {
-        alert('Acesso negado. Por favor, faça o login.');
-        window.location.href = 'login.html';
-        return;
-    }
-    
-    try {
-        JSON.parse(usuario);
-    } catch (e) {
-        console.error('Dados do usuário corrompidos:', e);
-        localStorage.removeItem('authToken');
-        localStorage.removeItem('usuario');
-        window.location.href = 'login.html';
-    }
-})();
+// Se estiver no PC (localhost), usa a porta 3001. Se estiver online (Render), usa o caminho relativo.
+const isLocal = window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1';
+const API_URL = isLocal ? 'http://localhost:3001/api' : '/api';
 
-/* * ========================================
- * VARIÁVEIS GLOBAIS
- * ========================================
- */
-const API_URL = 'https://dashboard-braseiro-api.onrender.com/api';
-let cashFlowChart;
-let expensesChart;
+// --- AUTH & INIT ---
+const token = localStorage.getItem('authToken');
+let user = null;
+try { user = JSON.parse(localStorage.getItem('usuario')); } catch (e) { console.error(e); }
+
+if (!token || !user) {
+    if(!window.location.href.includes('login.html')) window.location.href = 'login.html';
+} else {
+    startApp();
+}
+
+// VARIÁVEIS GLOBAIS
 let currentEditingId = null;
-let currentSortBy = 'data';
-let currentSortOrder = 'desc';
+let lancamentosCache = {}; 
+let categoriasCache = [];
+let currentPage = 1;
+let currentLimit = 50;
+let totalPagesEntrada = 1;
+let totalPagesSaida = 1;
+let chart1 = null;
+let chart2 = null;
 
-// Variáveis do DOM
-let modal, btnAbrirModal, btnFecharModal, btnCancelar, form, inputData, modalTitulo, btnSalvar;
-let editUserModal, editUserForm, editUserSaveBtn, editUserCancelBtn, 
-    editUserCloseModalBtn, editUserId, editUserMessageEl;
-
-window.usuariosGlobais = {};
-window.lancamentosGlobais = {};
-
-// --- FUNÇÃO AUXILIAR DE AUTENTICAÇÃO ---
-function getAuthHeaders() {
-    const token = localStorage.getItem('authToken');
-    if (!token) {
-        handleLogout();
-        throw new Error('Token de autenticação não encontrado');
-    }
-    return {
-        'Content-Type': 'application/json',
-        'Authorization': `Bearer ${token}`
-    };
+// --- NOTIFICAÇÕES GIGANTES (TOASTIFY) ---
+function notify(msg, type = 'success') {
+    const isError = type === 'error';
+    Toastify({
+        text: msg,
+        duration: 4000, 
+        gravity: "top", 
+        position: "right", 
+        stopOnFocus: true,
+        style: {
+            background: isError ? "#e74c3c" : "#2ecc71", 
+            borderRadius: "12px",       // Mais arredondado
+            fontWeight: "bold",
+            fontSize: "20px",           // Fonte grande
+            padding: "30px 40px",       // Caixa gorda
+            boxShadow: "0 6px 20px rgba(0,0,0,0.3)",
+            minWidth: "300px",
+            textAlign: "center"
+        },
+        onClick: function(){} 
+    }).showToast();
 }
 
-// --- FUNÇÃO DE FETCH COM AUTENTICAÇÃO ---
-async function fetchWithAuth(url, options = {}) {
-    const headers = getAuthHeaders();
-    const config = {
-        ...options,
-        headers: { ...headers, ...options.headers }
-    };
-    
-    const response = await fetch(url, config);
-    
-    if (response.status === 401 || response.status === 403) {
-        handleLogout();
-        throw new Error('Sessão expirada. Faça login novamente.');
-    }
-    
-    return response;
-}
+// --- MODAL DE CONFIRMAÇÃO GIGANTE ---
+function showConfirm(title, message, isDanger, callback) {
+    const modal = document.getElementById('modal-confirm');
+    const titleEl = document.getElementById('confirm-title');
+    const msgEl = document.getElementById('confirm-msg');
+    const btnYes = document.getElementById('btn-confirm-yes');
+    const btnNo = document.getElementById('btn-confirm-no');
 
-/* * ========================================
- * FUNÇÕES DE ATUALIZAÇÃO E FORMATAÇÃO
- * ========================================
- */
+    titleEl.innerText = title;
+    msgEl.innerText = message;
+    
+    btnYes.style.backgroundColor = isDanger ? '#e74c3c' : '#2ecc71';
+    btnYes.innerText = isDanger ? 'Confirmar' : 'Confirmar'; // Pode personalizar o texto se quiser
 
-function formatarMoeda(valor) {
-    const valorNum = Number(valor) || 0;
-    return valorNum.toLocaleString('pt-BR', { 
-        style: 'currency', 
-        currency: 'BRL',
-        minimumFractionDigits: 2,
-        maximumFractionDigits: 2
-    });
-}
-
-function formatarDataParaInput(data) {
-    if (!(data instanceof Date)) {
-        data = new Date(data);
-    }
-    const ano = data.getFullYear();
-    const mes = String(data.getMonth() + 1).padStart(2, '0');
-    const dia = String(data.getDate()).padStart(2, '0');
-    return `${ano}-${mes}-${dia}`;
-}
-
-function atualizarKPIs(dadosKPI) {
-    if (!dadosKPI) return;
-    
-    const elements = {
-        'saldoAnterior': '.card.saldo-anterior .value',
-        'saldoAtual': '.card.saldo-atual .value',
-        'totalEntradas': '.card.entradas .value',
-        'totalSaidas': '.card.saidas .value',
-        'saldoPeriodo': '.card.saldo .value'
-    };
-    
-    Object.entries(elements).forEach(([key, selector]) => {
-        const element = document.querySelector(selector);
-        if (element) {
-            element.textContent = formatarMoeda(dadosKPI[key] || 0);
-        }
-    });
-    
-    // Calcular margem
-    const margemLucroEl = document.querySelector('.card.margem .value');
-    const totalEntradas = Number(dadosKPI.totalEntradas) || 0;
-    const saldoPeriodo = Number(dadosKPI.saldoPeriodo) || 0;
-    const margem = totalEntradas !== 0 ? (saldoPeriodo / totalEntradas) * 100 : 0;
-    
-    if (margemLucroEl) {
-        margemLucroEl.textContent = margem.toFixed(1) + '%';
-        margemLucroEl.style.color = margem >= 0 ? 'var(--success)' : 'var(--danger)';
-    }
-}
-
-function atualizarGraficoFluxo(dadosGrafico) {
-    if (!cashFlowChart || !dadosGrafico) return;
-    
-    cashFlowChart.data.labels = dadosGrafico.labels || [];
-    cashFlowChart.data.datasets[0].data = dadosGrafico.valoresEntradas || [];
-    cashFlowChart.data.datasets[1].data = dadosGrafico.valoresSaidas || [];
-    cashFlowChart.data.datasets[2].data = dadosGrafico.valoresSaldoAcumulado || [];
-    cashFlowChart.update('none');
-}
-
-function atualizarGraficoDespesas(dadosDespesas) {
-    if (!expensesChart || !dadosDespesas) return;
-    
-    expensesChart.data.labels = dadosDespesas.labels || [];
-    expensesChart.data.datasets[0].data = dadosDespesas.valores || [];
-    
-    // Atualizar cores dinamicamente baseado no número de categorias
-    const cores = [
-        'rgba(231, 76, 60, 0.7)',   // danger
-        'rgba(52, 152, 219, 0.7)',  // secondary
-        'rgba(243, 156, 18, 0.7)',  // warning
-        'rgba(155, 89, 182, 0.7)',  // roxo
-        'rgba(46, 204, 113, 0.7)',  // success
-        'rgba(241, 196, 15, 0.7)',  // amarelo
-        'rgba(26, 188, 156, 0.7)',  // turquesa
-        'rgba(149, 165, 166, 0.7)', // cinza
-        'rgba(52, 73, 94, 0.7)',    // dark
-        'rgba(189, 195, 199, 0.7)'  // light gray
-    ];
-    
-    expensesChart.data.datasets[0].backgroundColor = 
-        dadosDespesas.labels?.map((_, index) => cores[index % cores.length]) || [];
-    
-    expensesChart.update('none');
-}
-
-function atualizarTabelas(dadosTabelas) {
-    if (!dadosTabelas) return;
-    
-    const tabelaEntradas = document.querySelector('.tables .table-container:nth-child(1) tbody');
-    const tabelaSaidas = document.querySelector('.tables .table-container:nth-child(2) tbody');
-    
-    if (!tabelaEntradas || !tabelaSaidas) return;
-    
-    tabelaEntradas.innerHTML = '';
-    tabelaSaidas.innerHTML = '';
-    
-    const trashIconSvg = `<svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6h18"></path><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path><line x1="10" y1="11" x2="10" y2="17"></line><line x1="14" y1="11" x2="14" y2="17"></line></svg>`;
-    const editIconSvg = `<svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"></path><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"></path></svg>`;
-    
-    window.lancamentosGlobais = {};
-
-    // Entradas
-    if (dadosTabelas.ultimasEntradas && dadosTabelas.ultimasEntradas.length > 0) {
-        dadosTabelas.ultimasEntradas.forEach(lancamento => {
-            const tr = document.createElement('tr');
-            const lancamentoKey = `lancamento_${lancamento.id}`;
-            window.lancamentosGlobais[lancamentoKey] = lancamento;
-            
-            tr.innerHTML = `
-                <td>${lancamento.data_tabela || 'N/A'}</td>
-                <td>${lancamento.descricao || 'Sem descrição'}</td>
-                <td>${lancamento.categoria || 'Outros'}</td>
-                <td class="positive">${formatarMoeda(lancamento.valor)}</td>
-                <td>
-                    <button class="btn-edit" onclick='abrirModalParaEditar(window.lancamentosGlobais["${lancamentoKey}"])' title="Editar este lançamento">${editIconSvg}</button>
-                    <button class="btn-delete" onclick="apagarLancamento(${lancamento.id}, '${(lancamento.descricao || '').replace(/'/g, "\\'")}')" title="Apagar este lançamento">${trashIconSvg}</button>
-                </td>
-            `;
-            tabelaEntradas.appendChild(tr);
-        });
-    } else {
-        tabelaEntradas.innerHTML = '<tr><td colspan="5">Nenhuma entrada encontrada</td></tr>';
-    }
-
-    // Saídas
-    if (dadosTabelas.ultimasSaidas && dadosTabelas.ultimasSaidas.length > 0) {
-        dadosTabelas.ultimasSaidas.forEach(lancamento => {
-            const tr = document.createElement('tr');
-            const lancamentoKey = `lancamento_${lancamento.id}`;
-            window.lancamentosGlobais[lancamentoKey] = lancamento;
-            
-            tr.innerHTML = `
-                <td>${lancamento.data_tabela || 'N/A'}</td>
-                <td>${lancamento.descricao || 'Sem descrição'}</td>
-                <td>${lancamento.categoria || 'Outros'}</td>
-                <td class="negative">${formatarMoeda(lancamento.valor)}</td>
-                <td>
-                    <button class="btn-edit" onclick='abrirModalParaEditar(window.lancamentosGlobais["${lancamentoKey}"])' title="Editar este lançamento">${editIconSvg}</button>
-                    <button class="btn-delete" onclick="apagarLancamento(${lancamento.id}, '${(lancamento.descricao || '').replace(/'/g, "\\'")}')" title="Apagar este lançamento">${trashIconSvg}</button>
-                </td>
-            `;
-            tabelaSaidas.appendChild(tr);
-        });
-    } else {
-        tabelaSaidas.innerHTML = '<tr><td colspan="5">Nenhuma saída encontrada</td></tr>';
-    }
-}
-
-/* * ========================================
- * FUNÇÃO PRINCIPAL DA API (GET /dados-dashboard)
- * ========================================
- */
-async function atualizarDashboard() {
-    const periodoSelecionado = document.getElementById('date-range').value;
-    const categoriaSelecionada = document.getElementById('category').value;
-    const metodoPagamento = document.getElementById('payment-method').value;
-    const dataInicioCustom = document.getElementById('start-date').value;
-    const dataFimCustom = document.getElementById('end-date').value;
-    const tipo = document.getElementById('filter-tipo').value;
-    const descricao = document.getElementById('filter-descricao').value;
-    const valorMin = document.getElementById('filter-valor-min').value;
-    const valorMax = document.getElementById('filter-valor-max').value;
-    
-    const params = new URLSearchParams();
-    params.append('periodo', periodoSelecionado);
-    params.append('categoria', categoriaSelecionada);
-    params.append('metodoPagamento', metodoPagamento);
-    
-    if (periodoSelecionado === 'custom') {
-        if (dataInicioCustom) params.append('dataInicio', dataInicioCustom);
-        if (dataFimCustom) params.append('dataFim', dataFimCustom);
-    }
-    
-    if (tipo && tipo !== 'all') {
-        params.append('tipo', tipo);
-    }
-    if (descricao) {
-        params.append('descricao', descricao);
-    }
-    if (valorMin) {
-        params.append('valorMin', valorMin);
-    }
-    if (valorMax) {
-        params.append('valorMax', valorMax);
-    }
-    params.append('sortBy', currentSortBy);
-    params.append('sortOrder', currentSortOrder);
-    
-    const queryString = params.toString();
-    const url = `${API_URL}/dados-dashboard?${queryString}`;
-    
-    document.body.style.cursor = 'wait';
-    
-    try {
-        const response = await fetchWithAuth(url, {
-            method: 'GET'
-        });
-        
-        if (!response.ok) {
-            const erroApi = await response.json();
-            throw new Error(`Erro na API: ${erroApi.error || response.statusText}`);
-        }
-        
-        const dados = await response.json();
-        
-        atualizarKPIs(dados.kpis);
-        atualizarGraficoFluxo(dados.graficoFluxoCaixa);
-        atualizarGraficoDespesas(dados.despesas);
-        atualizarTabelas(dados.tabelas);
-        
-        updateSortVisuals();
-        
-    } catch (error) {
-        console.error('Erro ao buscar dados do dashboard:', error);
-        if (!error.message.includes('Sessão expirada')) {
-            alert('Não foi possível carregar os dados do dashboard.\n\n' + error.message);
-        }
-    } finally {
-        document.body.style.cursor = 'default';
-    }
-}
-
-/* * ========================================
- * VALIDAÇÃO DE FORMULÁRIOS
- * ========================================
- */
-function validarLancamento(lancamento) {
-    const errors = [];
-    
-    if (!lancamento.data) errors.push('Data é obrigatória');
-    if (!lancamento.valor || lancamento.valor <= 0) errors.push('Valor deve ser maior que zero');
-    if (!lancamento.descricao?.trim()) errors.push('Descrição é obrigatória');
-    if (!lancamento.categoria) errors.push('Categoria é obrigatória');
-    if (!lancamento.metodo_pagamento) errors.push('Método de pagamento é obrigatório');
-    
-    return errors;
-}
-
-function validarSenha(senha) {
-    if (senha.length < 6) {
-        return 'A senha deve ter pelo menos 6 caracteres';
-    }
-    return null;
-}
-
-/* * ========================================
- * LÓGICA DO MODAL (Abrir/Fechar/Salvar)
- * ========================================
- */
-function abrirModal() {
-    if (!modalTitulo || !btnSalvar || !form || !inputData || !modal) {
-        console.error('Elementos do modal não foram encontrados.');
-        return;
-    }
-    
-    currentEditingId = null;
-    modalTitulo.textContent = 'Adicionar Novo Lançamento';
-    btnSalvar.textContent = 'Salvar Lançamento';
-    form.reset();
-    inputData.value = formatarDataParaInput(new Date());
-    document.getElementById('tipo-entrada').checked = true;
-    
     modal.classList.add('show');
-    document.body.style.overflow = 'hidden';
-}
+    modal.style.display = 'flex';
 
-function abrirModalParaEditar(lancamento) {
-    if (!lancamento) {
-        console.error('Falha ao tentar editar: objeto de lançamento não encontrado.');
-        return;
-    }
-    
-    if (!modalTitulo || !btnSalvar || !form || !inputData || !modal) {
-        console.error('Elementos do modal não foram encontrados.');
-        return;
-    }
-    
-    currentEditingId = lancamento.id;
-    modalTitulo.textContent = 'Editar Lançamento';
-    btnSalvar.textContent = 'Atualizar Lançamento';
-    
-    const categoriaMapInverso = {
-        'Vendas (Salão)': 'sales', 'Recebíveis Extras': 'extra',
-        'Mercado': 'market', 'Compras': 'purchases', 'Pessoal': 'staff',
-        'Utilidades': 'utilities', 'Manutenção': 'maintenance', 'Impostos': 'taxes',
-        'Investimentos': 'investments', 'Açougue': 'butchery', 'Contas/Boletos': 'bills',
-        'Pagamento Salário': 'salary', 'Pagamento Vale': 'voucher', 'Combustível': 'fuel',
-        'Outros': 'other'
-    };
-    
-    const metodoMapInverso = {
-        'Dinheiro': 'cash', 'Cartão': 'card', 'Pix': 'pix', 'Transferência': 'transfer', 
-        'Boleto': 'bill', 'Cartão + Pix': 'card-pix', 'Outro': 'other'
-    };
-    
-    // Preencher formulário
-    form.elements['tipo'].value = lancamento.tipo === 'Entrada' ? 'Entrada' : 'Saída';
-    inputData.value = lancamento.data_input || formatarDataParaInput(new Date(lancamento.data));
-    form.elements['form-valor'].value = lancamento.valor || '';
-    form.elements['form-descricao'].value = lancamento.descricao || '';
-    form.elements['form-categoria'].value = categoriaMapInverso[lancamento.categoria] || 'other';
-    form.elements['form-metodo'].value = metodoMapInverso[lancamento.metodo_pagamento] || 'other';
-    
-    modal.classList.add('show');
-    document.body.style.overflow = 'hidden';
-}
+    btnYes.onclick = null;
+    btnNo.onclick = null;
 
-function fecharModal() {
-    if (modal) {
+    btnYes.onclick = () => {
         modal.classList.remove('show');
-        document.body.style.overflow = 'auto';
-    }
-    if (editUserModal) {
-        editUserModal.classList.remove('show');
-    }
-}
-
-async function salvarLancamento(event) {
-    event.preventDefault();
-    
-    const lancamento = {
-        tipo: form.elements['tipo'].value,
-        data: inputData.value,
-        valor: parseFloat(form.elements['form-valor'].value),
-        descricao: form.elements['form-descricao'].value.trim(),
-        categoria: form.elements['form-categoria'].value,
-        metodo_pagamento: form.elements['form-metodo'].value
+        modal.style.display = 'none';
+        callback();
     };
-    
-    // Validação
-    const errors = validarLancamento(lancamento);
-    if (errors.length > 0) {
-        alert('Por favor, corrija os seguintes erros:\n\n• ' + errors.join('\n• '));
-        return;
+
+    btnNo.onclick = () => {
+        modal.classList.remove('show');
+        modal.style.display = 'none';
+    };
+}
+
+function startApp() {
+    if (user.role === 'admin') {
+        const adminLi = document.getElementById('nav-link-admin-li');
+        const logsLi = document.getElementById('nav-link-logs-li');
+        if(adminLi) adminLi.style.display = 'block';
+        if(logsLi) logsLi.style.display = 'block';
     }
+
+    setupNav('nav-link-dashboard-li', 'page-dashboard', loadDashboard);
+    setupNav('nav-link-perfil-li', 'page-perfil', loadPerfil);
+    setupNav('nav-link-admin-li', 'page-admin', loadUsers);
+    setupNav('nav-link-logs-li', 'page-logs', loadLogs);
+
+    const btnLogout = document.getElementById('btn-logout');
+    if(btnLogout) btnLogout.onclick = () => { localStorage.clear(); window.location.href='login.html'; };
     
-    let url, method;
-    if (currentEditingId) {
-        url = `${API_URL}/lancamento/${currentEditingId}`;
-        method = 'PUT';
-    } else {
-        url = `${API_URL}/lancamento`;
-        method = 'POST';
+    // Modal Lançamento
+    const modal = document.getElementById('modal-lanc');
+    const btnNovo = document.getElementById('btn-novo-lanc');
+    if(btnNovo && modal) {
+        btnNovo.onclick = () => {
+            currentEditingId = null; 
+            document.getElementById('modal-title').innerText = "Adicionar Novo Lançamento";
+            document.getElementById('form-lanc').reset();
+            document.querySelectorAll('input[name="tipo"]').forEach(r => r.checked = false);
+            document.getElementById('m-data').value = new Date().toISOString().split('T')[0];
+            filterCatModal(null);
+            const container = document.getElementById('payment-rows-container');
+            if(container) { container.innerHTML = ''; addPaymentRow(); updateTotalDisplay(); }
+            modal.classList.add('show'); modal.style.display = 'flex';
+        };
+        document.getElementById('btn-close-modal').onclick = () => { modal.classList.remove('show'); modal.style.display = 'none'; };
+        document.getElementById('btn-cancel-modal').onclick = () => { modal.classList.remove('show'); modal.style.display = 'none'; };
+        document.getElementById('form-lanc').onsubmit = saveLancamento;
+        document.getElementsByName('tipo').forEach(r => r.onchange = () => filterCatModal(r.value));
+        const btnAddRow = document.getElementById('btn-add-payment-row');
+        if(btnAddRow) btnAddRow.onclick = () => addPaymentRow();
     }
+
+    // Modal Categorias
+    const catModal = document.getElementById('modal-new-cat');
+    const btnAddCat = document.getElementById('btn-add-cat');
+    if(btnAddCat && catModal) {
+        btnAddCat.onclick = () => { catModal.classList.add('show'); catModal.style.display = 'flex'; renderCatListInModal(); };
+        document.getElementById('btn-close-cat').onclick = () => { catModal.classList.remove('show'); catModal.style.display = 'none'; };
+        document.getElementById('form-new-cat').onsubmit = saveCategoria;
+    }
+
+    // Dashboard
+    const btnAtualizar = document.getElementById('btn-atualizar');
+    if(btnAtualizar) btnAtualizar.onclick = () => { currentPage = 1; loadDashboard(); };
+    const btnExportar = document.getElementById('btn-exportar');
+    if(btnExportar) btnExportar.onclick = exportCSV;
+    const btnPdf = document.getElementById('btn-pdf');
+    if(btnPdf) btnPdf.onclick = exportPDF;
     
-    document.body.style.cursor = 'wait';
-    btnSalvar.disabled = true;
-    btnSalvar.textContent = 'Salvando...';
-    
+    const selectLimit = document.getElementById('items-per-page');
+    if(selectLimit) {
+        selectLimit.onchange = (e) => { currentLimit = parseInt(e.target.value); currentPage = 1; loadDashboard(); };
+    }
+    const btnPrev = document.getElementById('btn-prev-page');
+    if(btnPrev) btnPrev.onclick = () => { if(currentPage > 1) { currentPage--; loadDashboard(); } };
+    const btnNext = document.getElementById('btn-next-page');
+    if(btnNext) btnNext.onclick = () => { const maxPages = Math.max(totalPagesEntrada, totalPagesSaida); if(currentPage < maxPages) { currentPage++; loadDashboard(); } };
+
+    const filtroPeriodo = document.getElementById('filtro-periodo');
+    if(filtroPeriodo) {
+        filtroPeriodo.onchange = (e) => {
+            const custom = document.querySelector('.custom-dates');
+            if(custom) custom.style.display = e.target.value === 'custom' ? 'flex' : 'none';
+        };
+    }
+
+    // Forms
+    const formSenha = document.getElementById('form-senha'); if(formSenha) formSenha.onsubmit = changePass;
+    const formUser = document.getElementById('form-user'); if(formUser) formUser.onsubmit = registerUser;
+    const btnFilterLogs = document.getElementById('btn-filter-logs'); if(btnFilterLogs) btnFilterLogs.onclick = loadLogs;
+
+    const editModal = document.getElementById('edit-user-modal');
+    if(editModal) {
+        document.getElementById('edit-user-close-modal-btn').onclick = () => { editModal.classList.remove('show'); editModal.style.display = 'none'; };
+        document.getElementById('edit-user-cancel-btn').onclick = () => { editModal.classList.remove('show'); editModal.style.display = 'none'; };
+        document.getElementById('edit-user-save-btn').onclick = saveEditUser;
+    }
+
+    setTimeout(() => { initCharts(); carregarCategorias(); loadDashboard(); }, 100);
+}
+
+// --- API ---
+async function fetchAPI(url, opts = {}) {
     try {
-        const response = await fetchWithAuth(url, {
-            method: method,
-            body: JSON.stringify(lancamento)
+        const res = await fetch(API_URL + url, {
+            ...opts,
+            headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` }
         });
-        
-        if (!response.ok) {
-            const erro = await response.json();
-            throw new Error(erro.error || 'Falha ao salvar');
-        }
-        
-        fecharModal();
-        await atualizarDashboard(); // Atualizar dados
-        
-    } catch (error) {
-        console.error('Erro ao salvar lançamento:', error);
-        alert('Erro ao salvar lançamento: ' + error.message);
-    } finally {
-        document.body.style.cursor = 'default';
-        btnSalvar.disabled = false;
-        btnSalvar.textContent = currentEditingId ? 'Atualizar Lançamento' : 'Salvar Lançamento';
-    }
+        if (res.status === 401 || res.status === 403) { localStorage.clear(); window.location.href = 'login.html'; return null; }
+        return res;
+    } catch (e) { console.error('Erro Rede:', e); notify('Erro de conexão', 'error'); return null; }
 }
 
-/* * ========================================
- * LÓGICA DE APAGAR (DELETE)
- * ========================================
- */
-async function apagarLancamento(id, descricao) {
-    const confirmado = confirm(`Tem certeza que deseja apagar o lançamento:\n"${descricao}"?\n\nEsta ação não pode ser desfeita.`);
-    if (!confirmado) {
-        return;
+// --- EXPORT PDF ---
+async function exportPDF() {
+    const { jsPDF } = window.jspdf; const doc = new jsPDF(); 
+    const primaryColor = [44, 62, 80]; const greenColor = [46, 204, 113]; const redColor = [231, 76, 60];      
+    const logoImg = document.getElementById('footer-logo');
+    let startY = 15;
+    if (logoImg && logoImg.complete) {
+        try {
+            const canvas = document.createElement("canvas"); canvas.width = logoImg.naturalWidth; canvas.height = logoImg.naturalHeight;
+            const ctx = canvas.getContext("2d"); ctx.drawImage(logoImg, 0, 0); const logoData = canvas.toDataURL("image/png");
+            doc.addImage(logoData, 'PNG', 14, 10, 30, (logoImg.naturalHeight * 30) / logoImg.naturalWidth);
+            doc.setFontSize(22); doc.setTextColor(...primaryColor); doc.text("Relatório Financeiro", 50, 20);
+            doc.setFontSize(14); doc.text("Braseiro Grill", 50, 28);
+            doc.setFontSize(10); doc.setTextColor(100); doc.text(`Gerado em: ${new Date().toLocaleString('pt-BR')}`, 50, 35);
+            startY = 45;
+        } catch (e) { doc.setFontSize(22); doc.text("Relatório", 14, 20); startY = 40; }
+    } else { doc.setFontSize(22); doc.setTextColor(...primaryColor); doc.text("Relatório", 14, 20); startY = 40; }
+
+    let finalY = startY;
+    const totalEnt = document.getElementById('kpi-entradas')?.innerText || "0";
+    const totalSai = document.getElementById('kpi-saidas')?.innerText || "0";
+    const saldo = document.getElementById('kpi-saldo-periodo')?.innerText || "0";
+
+    doc.setFontSize(12); doc.setTextColor(0); doc.text(`Resumo do Período:`, 14, finalY);
+    doc.setFontSize(10); doc.setTextColor(...greenColor); doc.text(`Entradas: ${totalEnt}`, 14, finalY + 6);
+    doc.setTextColor(...redColor); doc.text(`Saídas: ${totalSai}`, 70, finalY + 6);
+    doc.setTextColor(...primaryColor); doc.text(`Saldo: ${saldo}`, 130, finalY + 6);
+    finalY += 15;
+
+    const getSharpImage = (chartInstance) => {
+        if (!chartInstance) return null;
+        const canvas = chartInstance.canvas; const w = canvas.width; const h = canvas.height;
+        canvas.width = w * 4; canvas.height = h * 4;
+        const anim = chartInstance.options.animation; chartInstance.options.animation = false; chartInstance.resize(); 
+        const imgData = canvas.toDataURL('image/png', 1.0);
+        canvas.width = w; canvas.height = h; chartInstance.options.animation = anim; chartInstance.resize(); 
+        return imgData;
+    };
+
+    if (chart1 && chart2) {
+        const imgFluxo = getSharpImage(chart1); const imgDesp = getSharpImage(chart2);
+        if(imgFluxo) { doc.setFontSize(12); doc.setTextColor(0); doc.text("Fluxo de Caixa", 14, finalY); doc.addImage(imgFluxo, 'PNG', 14, finalY + 2, 180, 70); finalY += 80; }
+        if (finalY > 180) { doc.addPage(); finalY = 20; }
+        if(imgDesp) { doc.text("Despesas por Categoria", 14, finalY); doc.addImage(imgDesp, 'PNG', 14, finalY + 2, 180, 70); finalY += 80; }
     }
+
+    const getTableData = (tableId) => {
+        const table = document.getElementById(tableId); if(!table) return []; const rows = [];
+        table.querySelectorAll('tr').forEach(tr => { const rowData = []; tr.querySelectorAll('td').forEach((td, index) => { if (index < 4) rowData.push(td.innerText); }); if (rowData.length > 0) rows.push(rowData); });
+        return rows;
+    };
+
+    if (finalY > 220) { doc.addPage(); finalY = 20; } else finalY += 10;
+    const entradasData = getTableData('tb-entradas');
+    if (entradasData.length > 0) { doc.setFontSize(14); doc.setTextColor(...greenColor); doc.text("Entradas", 14, finalY); doc.autoTable({ startY: finalY + 5, head: [['Data', 'Descrição', 'Categoria', 'Valor']], body: entradasData, theme: 'grid', headStyles: { fillColor: greenColor }, styles: { fontSize: 9 }, columnStyles: { 3: { halign: 'right', fontStyle: 'bold' } } }); finalY = doc.lastAutoTable.finalY + 15; }
     
-    document.body.style.cursor = 'wait';
-    
-    try {
-        const response = await fetchWithAuth(`${API_URL}/lancamento/${id}`, {
-            method: 'DELETE'
-        });
-        
-        if (!response.ok && response.status !== 204) {
-            const erro = await response.json();
-            throw new Error(erro.error || 'Falha ao apagar');
-        }
-        
-        await atualizarDashboard(); // Atualizar dados após exclusão
-        
-    } catch (error) {
-        console.error('Erro ao apagar lançamento:', error);
-        alert('Erro ao apagar: ' + error.message);
-    } finally {
-        document.body.style.cursor = 'default';
-    }
+    const saidasData = getTableData('tb-saidas');
+    if (saidasData.length > 0) { if (finalY > 250) { doc.addPage(); finalY = 20; } doc.setFontSize(14); doc.setTextColor(...redColor); doc.text("Saídas", 14, finalY); doc.autoTable({ startY: finalY + 5, head: [['Data', 'Descrição', 'Categoria', 'Valor']], body: saidasData, theme: 'grid', headStyles: { fillColor: redColor }, styles: { fontSize: 9 }, columnStyles: { 3: { halign: 'right', fontStyle: 'bold' } } }); }
+
+    doc.save(`relatorio_braseiro_${new Date().toISOString().split('T')[0]}.pdf`);
 }
 
-/* * ========================================
- * LÓGICA DE EXPORTAÇÃO (CSV)
- * ========================================
- */
-async function exportarDados() {
-    const periodoSelecionado = document.getElementById('date-range').value;
-    const categoriaSelecionada = document.getElementById('category').value;
-    const metodoPagamento = document.getElementById('payment-method').value;
-    const dataInicioCustom = document.getElementById('start-date').value;
-    const dataFimCustom = document.getElementById('end-date').value;
-    const tipo = document.getElementById('filter-tipo').value;
-    const descricao = document.getElementById('filter-descricao').value;
-    const valorMin = document.getElementById('filter-valor-min').value;
-    const valorMax = document.getElementById('filter-valor-max').value;
-    
-    const params = new URLSearchParams();
-    params.append('periodo', periodoSelecionado);
-    params.append('categoria', categoriaSelecionada);
-    params.append('metodoPagamento', metodoPagamento);
-    
-    if (periodoSelecionado === 'custom') {
-        if (dataInicioCustom) params.append('dataInicio', dataInicioCustom);
-        if (dataFimCustom) params.append('dataFim', dataFimCustom);
-    }
-    
-    if (tipo && tipo !== 'all') {
-        params.append('tipo', tipo);
-    }
-    if (descricao) {
-        params.append('descricao', descricao);
-    }
-    if (valorMin) {
-        params.append('valorMin', valorMin);
-    }
-    if (valorMax) {
-        params.append('valorMax', valorMax);
-    }
-    params.append('sortBy', currentSortBy);
-    params.append('sortOrder', currentSortOrder);
-    
-    const queryString = params.toString();
-    const url = `${API_URL}/exportar?${queryString}`;
-    
-    document.body.style.cursor = 'wait';
-    
-    try {
-        const response = await fetchWithAuth(url, {
-            method: 'GET'
-        });
-        
-        if (!response.ok) {
-            const erro = await response.json();
-            throw new Error(erro.error || 'Falha ao gerar exportação');
-        }
-        
-        const blob = await response.blob();
-        const disposition = response.headers.get('content-disposition');
-        let nomeArquivo = 'exportacao-financeira.csv';
-        
-        if (disposition && disposition.includes('filename=')) {
-            const matches = /filename[^;=\n]*=((['"]).*?\2|[^;\n]*)/.exec(disposition);
-            if (matches != null && matches[1]) {
-                nomeArquivo = matches[1].replace(/['"]/g, '');
-            }
-        }
-        
-        const a = document.createElement('a');
-        const objectUrl = window.URL.createObjectURL(blob);
-        a.href = objectUrl;
-        a.download = nomeArquivo;
-        a.style.display = 'none';
-        document.body.appendChild(a);
-        a.click();
-        document.body.removeChild(a);
-        window.URL.revokeObjectURL(objectUrl);
-        
-    } catch (error) {
-        console.error('Erro ao tentar iniciar a exportação:', error);
-        alert('Não foi possível iniciar a exportação: ' + error.message);
-    } finally {
-        document.body.style.cursor = 'default';
-    }
+// --- MULTI-PAGAMENTO ---
+window.addPaymentRow = function(val = '', method = '') {
+    const container = document.getElementById('payment-rows-container');
+    if(!container) return;
+    const div = document.createElement('div');
+    div.className = 'payment-row';
+    div.innerHTML = `<input type="number" step="0.01" class="row-val" placeholder="Valor R$" value="${val}" required oninput="updateTotalDisplay()"><select class="row-method" required><option value="cash" ${method==='cash'?'selected':''}>Dinheiro</option><option value="card" ${method==='card'?'selected':''}>Cartão</option><option value="pix" ${method==='pix'?'selected':''}>Pix</option><option value="transfer" ${method==='transfer'?'selected':''}>Transferência</option><option value="bill" ${method==='bill'?'selected':''}>Boleto</option><option value="card-pix" ${method==='card-pix'?'selected':''}>Cartão + Pix</option><option value="other" ${method==='other'?'selected':''}>Outro</option></select><button type="button" class="btn-remove-row" onclick="removePaymentRow(this)" title="Remover">X</button>`;
+    container.appendChild(div);
 }
 
-/* * ========================================
- * LÓGICA DE ORDENAÇÃO
- * ========================================
- */
-function handleSortHeaderClick(event) {
-    const newSortBy = event.currentTarget.dataset.sort;
-    if (newSortBy === currentSortBy) {
-        currentSortOrder = currentSortOrder === 'desc' ? 'asc' : 'desc';
-    } else {
-        currentSortBy = newSortBy;
-        currentSortOrder = 'desc';
-    }
-    atualizarDashboard();
+window.removePaymentRow = function(btn) {
+    const container = document.getElementById('payment-rows-container');
+    if(container && container.children.length > 1) { btn.parentElement.remove(); updateTotalDisplay(); } else { notify('Necessário pelo menos um pagamento.', 'error'); }
 }
 
-function updateSortVisuals() {
-    document.querySelectorAll('th[data-sort]').forEach(th => {
-        th.classList.remove('sort-active', 'sort-asc', 'sort-desc');
-        if (th.dataset.sort === currentSortBy) {
-            th.classList.add('sort-active');
-            th.classList.add(currentSortOrder === 'asc' ? 'sort-asc' : 'sort-desc');
-        }
-    });
+window.updateTotalDisplay = function() {
+    let total = 0;
+    document.querySelectorAll('.row-val').forEach(inp => { total += parseFloat(inp.value || 0); });
+    const display = document.getElementById('m-total-display');
+    if(display) display.innerText = total.toLocaleString('pt-BR', {minimumFractionDigits: 2});
 }
 
-/* * ========================================
- * LÓGICA DE LOGOUT
- * ========================================
- */
-function handleLogout() {
-    localStorage.removeItem('authToken');
-    localStorage.removeItem('usuario');
-    window.location.href = 'login.html';
-}
+// --- DASHBOARD ---
+async function loadDashboard() {
+    const elPeriodo = document.getElementById('filtro-periodo');
+    if(!elPeriodo) return; 
 
-/* * ========================================
- * FUNÇÕES DA PÁGINA "MEU PERFIL"
- * ========================================
- */
-function carregarInfoPerfil() {
-    try {
-        const usuarioString = localStorage.getItem('usuario');
-        if (usuarioString) {
-            const usuario = JSON.parse(usuarioString);
-            document.getElementById('perfil-info-nome').value = usuario.nome || '';
-            document.getElementById('perfil-info-email').value = usuario.email || '';
-            document.getElementById('perfil-info-role').value = usuario.role === 'admin' ? 'Administrador' : 'Usuário Simples';
-        }
-    } catch (e) {
-        console.error("Erro ao carregar informações do perfil:", e);
-    }
-}
-
-async function handleAlterarSenha(event) {
-    event.preventDefault();
-    
-    const senhaAtual = document.getElementById('perfil-senha-atual').value;
-    const novaSenha = document.getElementById('perfil-nova-senha').value;
-    const confirmaSenha = document.getElementById('perfil-confirma-senha').value;
-    
-    const btn = document.getElementById('perfil-save-btn');
-    const messageEl = document.getElementById('perfil-message');
-    
-    messageEl.textContent = '';
-    messageEl.className = 'admin-message';
-
-    // Validação
-    if (novaSenha !== confirmaSenha) {
-        messageEl.textContent = 'A "Nova Senha" e a "Confirmação" não conferem.';
-        messageEl.classList.add('error');
-        return;
-    }
-    
-    const erroSenha = validarSenha(novaSenha);
-    if (erroSenha) {
-        messageEl.textContent = erroSenha;
-        messageEl.classList.add('error');
-        return;
-    }
-
-    btn.disabled = true;
-    btn.textContent = 'Alterando...';
-
-    try {
-        const response = await fetchWithAuth(`${API_URL}/perfil/alterar-senha`, {
-            method: 'POST',
-            body: JSON.stringify({ senhaAtual, novaSenha })
-        });
-
-        const data = await response.json();
-
-        if (!response.ok) {
-            throw new Error(data.error || 'Falha ao alterar a senha.');
-        }
-        
-        // Sucesso
-        messageEl.textContent = 'Senha alterada com sucesso! Você será desconectado.';
-        messageEl.classList.add('success');
-        
-        // Força o logout por segurança
-        setTimeout(() => {
-            handleLogout();
-        }, 2500);
-
-    } catch (error) {
-        console.error('Erro ao alterar senha:', error);
-        messageEl.textContent = error.message;
-        messageEl.classList.add('error');
-        btn.disabled = false;
-        btn.textContent = 'Alterar Senha';
-    }
-}
-
-/* * ========================================
- * FUNÇÕES DA PÁGINA DE ADMIN
- * ========================================
- */
-async function carregarUsuarios() {
-    const tbody = document.getElementById('admin-user-list-tbody');
-    if (!tbody) return;
-    
-    tbody.innerHTML = '<tr><td colspan="5">Carregando...</td></tr>';
-    window.usuariosGlobais = {};
-    
-    const editIconSvg = `<svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"></path><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"></path></svg>`;
-    const resetIconSvg = `<svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="23 4 23 10 17 10"></polyline><polyline points="1 20 1 14 7 14"></polyline><path d="M3.51 9a9 9 0 0 1 14.85-3.36L20.49 2M3.51 22a9 9 0 0 1-2.85-13.35"></path></svg>`;
-    const trashIconSvg = `<svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6h18"></path><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path><line x1="10" y1="11" x2="10" y2="17"></line><line x1="14" y1="11" x2="14" y2="17"></line></svg>`;
-    
-    try {
-        const response = await fetchWithAuth(`${API_URL}/usuarios`, {
-            method: 'GET'
-        });
-        
-        if (!response.ok) {
-            const erro = await response.json();
-            throw new Error(erro.error || 'Falha ao carregar usuários');
-        }
-        
-        const usuarios = await response.json();
-        tbody.innerHTML = '';
-        
-        if (!usuarios || usuarios.length === 0) {
-            tbody.innerHTML = '<tr><td colspan="5">Nenhum usuário encontrado.</td></tr>';
-            return;
-        }
-        
-        usuarios.forEach(user => {
-            const userKey = `user_${user.id}`;
-            window.usuariosGlobais[userKey] = user;
-            
-            const tr = document.createElement('tr');
-            const dataFormatada = user.created_at ? 
-                new Date(user.created_at).toLocaleDateString('pt-BR') : 'N/A';
-            
-            tr.innerHTML = `
-                <td>${user.nome || 'N/A'}</td>
-                <td>${user.email || 'N/A'}</td>
-                <td>${user.role === 'admin' ? 'Administrador' : 'Usuário Simples'}</td>
-                <td>${dataFormatada}</td>
-                <td style="white-space: nowrap;">
-                    <button class="btn-edit" onclick="abrirModalEditarUsuario(window.usuariosGlobais['${userKey}'])" title="Editar Usuário">${editIconSvg}</button>
-                    <button class="btn-edit" style="color: var(--warning);" onclick="handleResetSenha('${user.id}', '${(user.nome || '').replace(/'/g, "\\'")}')" title="Resetar Senha do Usuário">${resetIconSvg}</button>
-                    <button class="btn-delete" onclick="handleDeleteUsuario('${user.id}', '${(user.nome || '').replace(/'/g, "\\'")}')" title="DELETAR Usuário">${trashIconSvg}</button>
-                </td>
-            `;
-            tbody.appendChild(tr);
-        });
-        
-    } catch (error) {
-        console.error('Erro ao carregar usuários:', error);
-        tbody.innerHTML = `<tr><td colspan="5" style="color: var(--danger);">${error.message}</td></tr>`;
-    }
-}
-
-function abrirModalEditarUsuario(usuario) {
-    if (!usuario) {
-        console.error('Dados do usuário não encontrados para edição.');
-        return;
-    }
-    
-    editUserId.value = usuario.id;
-    document.getElementById('edit-user-nome').value = usuario.nome || '';
-    document.getElementById('edit-user-email').value = usuario.email || '';
-    document.getElementById('edit-user-role').value = usuario.role || 'simples';
-    
-    editUserMessageEl.textContent = '';
-    editUserMessageEl.className = 'admin-message';
-    editUserModal.classList.add('show');
-    document.body.style.overflow = 'hidden';
-}
-
-async function handleSalvarEdicaoUsuario(event) {
-    event.preventDefault();
-    
-    const id = editUserId.value;
-    const nome = document.getElementById('edit-user-nome').value.trim();
-    const email = document.getElementById('edit-user-email').value.trim();
-    const role = document.getElementById('edit-user-role').value;
-    
-    if (!nome || !email) {
-        editUserMessageEl.textContent = 'Nome e email são obrigatórios.';
-        editUserMessageEl.classList.add('error');
-        return;
-    }
-    
-    editUserSaveBtn.disabled = true;
-    editUserSaveBtn.textContent = 'Salvando...';
-    editUserMessageEl.textContent = '';
-    editUserMessageEl.className = 'admin-message';
-    
-    try {
-        const response = await fetchWithAuth(`${API_URL}/usuarios/${id}`, {
-            method: 'PUT',
-            body: JSON.stringify({ nome, email, role })
-        });
-        
-        const data = await response.json();
-        
-        if (!response.ok) {
-            throw new Error(data.error || 'Falha ao salvar as alterações.');
-        }
-        
-        editUserMessageEl.textContent = 'Usuário atualizado com sucesso!';
-        editUserMessageEl.classList.add('success');
-        
-        await carregarUsuarios();
-        
-        setTimeout(() => {
-            editUserModal.classList.remove('show');
-            document.body.style.overflow = 'auto';
-        }, 1500);
-        
-    } catch (error) {
-        console.error('Erro ao salvar usuário:', error);
-        editUserMessageEl.textContent = error.message;
-        editUserMessageEl.classList.add('error');
-    } finally {
-        editUserSaveBtn.disabled = false;
-        editUserSaveBtn.textContent = 'Salvar Alterações';
-    }
-}
-
-async function handleResetSenha(userId, userName) {
-    const novaSenha = prompt(`Digite a NOVA senha provisória para o usuário "${userName}":`);
-    if (!novaSenha || novaSenha.trim() === '') {
-        alert('Reset de senha cancelado.');
-        return;
-    }
-    
-    const erroSenha = validarSenha(novaSenha);
-    if (erroSenha) {
-        alert(erroSenha);
-        return;
-    }
-    
-    const confirmacao = prompt(`Confirme a NOVA senha provisória:`);
-    if (novaSenha !== confirmacao) {
-        alert('As senhas não conferem. Operação cancelada.');
-        return;
-    }
-    
-    document.body.style.cursor = 'wait';
-    
-    try {
-        const response = await fetchWithAuth(`${API_URL}/usuarios/admin-reset-senha`, {
-            method: 'POST',
-            body: JSON.stringify({ userId, novaSenha })
-        });
-        
-        const data = await response.json();
-        
-        if (!response.ok) {
-            throw new Error(data.error || 'Falha ao resetar a senha.');
-        }
-        
-        alert(`Sucesso! A senha do usuário "${userName}" foi resetada.`);
-        
-    } catch (error) {
-        console.error('Erro ao resetar senha:', error);
-        alert('Erro: ' + error.message);
-    } finally {
-        document.body.style.cursor = 'default';
-    }
-}
-
-async function handleDeleteUsuario(userId, userName) {
-    const confirmacao = prompt(`ATENÇÃO: Esta ação é irreversível.\n\nPara confirmar a exclusão do usuário "${userName}", digite "DELETAR" abaixo:`);
-    if (confirmacao !== "DELETAR") {
-        alert('Exclusão cancelada.');
-        return;
-    }
-    
-    document.body.style.cursor = 'wait';
-    
-    try {
-        const response = await fetchWithAuth(`${API_URL}/usuarios/${userId}`, {
-            method: 'DELETE'
-        });
-        
-        if (response.status === 204) {
-            alert('Usuário deletado com sucesso.');
-            await carregarUsuarios();
-        } else {
-            const data = await response.json();
-            throw new Error(data.error || 'Falha ao deletar usuário.');
-        }
-        
-    } catch (error) {
-        console.error('Erro ao deletar usuário:', error);
-        alert('Erro: ' + error.message);
-    } finally {
-        document.body.style.cursor = 'default';
-    }
-}
-
-async function handleRegistroAdmin(event) {
-    event.preventDefault();
-    
-    const nome = document.getElementById('admin-nome').value.trim();
-    const email = document.getElementById('admin-email').value.trim();
-    const senha = document.getElementById('admin-senha').value;
-    
-    const btn = document.getElementById('admin-register-btn');
-    const messageEl = document.getElementById('admin-register-message');
-    
-    btn.disabled = true;
-    btn.textContent = 'Registrando...';
-    messageEl.textContent = '';
-    messageEl.className = 'admin-message';
-    
-    // Validação
-    if (!nome || !email || !senha) {
-        messageEl.textContent = 'Todos os campos são obrigatórios.';
-        messageEl.classList.add('error');
-        btn.disabled = false;
-        btn.textContent = 'Registrar Usuário';
-        return;
-    }
-    
-    const erroSenha = validarSenha(senha);
-    if (erroSenha) {
-        messageEl.textContent = erroSenha;
-        messageEl.classList.add('error');
-        btn.disabled = false;
-        btn.textContent = 'Registrar Usuário';
-        return;
-    }
-    
-    try {
-        const response = await fetchWithAuth(`${API_URL}/registrar`, {
-            method: 'POST',
-            body: JSON.stringify({ nome, email, senha })
-        });
-        
-        const data = await response.json();
-        
-        if (!response.ok) {
-            throw new Error(data.error || 'Falha ao registrar usuário');
-        }
-        
-        messageEl.textContent = 'Usuário registrado com sucesso!';
-        messageEl.classList.add('success');
-        document.getElementById('admin-register-form').reset();
-        
-        await carregarUsuarios();
-        
-    } catch (error) {
-        console.error('Erro no registro de admin:', error);
-        messageEl.textContent = error.message;
-        messageEl.classList.add('error');
-    } finally {
-        btn.disabled = false;
-        btn.textContent = 'Registrar Usuário';
-    }
-}
-
-/* * ========================================
- * INICIALIZAÇÃO E EVENT LISTENERS
- * ========================================
- */
-document.addEventListener('DOMContentLoaded', () => {
-    // Verificar permissões de admin
-    try {
-        const usuarioString = localStorage.getItem('usuario');
-        if (usuarioString) {
-            const usuario = JSON.parse(usuarioString);
-            if (usuario && usuario.role === 'admin') {
-                const adminLink = document.getElementById('nav-link-admin-li');
-                if (adminLink) {
-                    adminLink.style.display = 'block';
-                }
-            }
-        }
-    } catch (e) {
-        console.error("Erro ao verificar permissões de admin:", e);
-    }
-
-    // Definir variáveis do DOM
-    modal = document.getElementById('entry-modal');
-    btnAbrirModal = document.getElementById('add-entry-btn');
-    btnFecharModal = document.getElementById('close-modal-btn');
-    btnCancelar = document.getElementById('cancel-btn');
-    form = document.getElementById('entry-form');
-    inputData = document.getElementById('form-data');
-    modalTitulo = document.getElementById('modal-title');
-    btnSalvar = document.getElementById('save-btn');
-    
-    editUserModal = document.getElementById('edit-user-modal');
-    editUserForm = document.getElementById('edit-user-form');
-    editUserSaveBtn = document.getElementById('edit-user-save-btn');
-    editUserCancelBtn = document.getElementById('edit-user-cancel-btn');
-    editUserCloseModalBtn = document.getElementById('edit-user-close-modal-btn');
-    editUserId = document.getElementById('edit-user-id');
-    editUserMessageEl = document.getElementById('edit-user-message');
-    
-    const perfilPage = document.getElementById('perfil-page-content');
-    const perfilForm = document.getElementById('perfil-change-password-form');
-    const navLinkPerfil = document.getElementById('nav-link-perfil');
-    const navLinkPerfilLi = document.getElementById('nav-link-perfil-li');
-    
-    const dashboardPage = document.getElementById('dashboard-page-content');
-    const adminPage = document.getElementById('admin-page-content');
-    const navLinkDashboard = document.getElementById('nav-link-dashboard');
-    const navLinkAdmin = document.getElementById('nav-link-admin');
-    const navLinkAdminLi = document.getElementById('nav-link-admin-li');
-    const navLinkDashboardLi = document.getElementById('nav-link-dashboard-li');
-    
-    const adminRegisterForm = document.getElementById('admin-register-form');
-
-    // Atualizar data atual
-    const dateElement = document.getElementById('current-date');
-    if (dateElement) {
-        dateElement.textContent = new Date().toLocaleDateString('pt-BR', {
-            weekday: 'long',
-            year: 'numeric',
-            month: 'long',
-            day: 'numeric'
-        });
-    }
-
-    // Event Listeners para filtros
-    document.getElementById('date-range').addEventListener('change', function() {
-        const customDates = document.querySelectorAll('.custom-dates');
-        if (this.value === 'custom') {
-            customDates.forEach(el => el.style.display = 'flex');
-            
-            // Preencher datas padrão para o período personalizado
-            const hoje = new Date();
-            const umaSemanaAtras = new Date(hoje);
-            umaSemanaAtras.setDate(hoje.getDate() - 7);
-            
-            document.getElementById('start-date').value = formatarDataParaInput(umaSemanaAtras);
-            document.getElementById('end-date').value = formatarDataParaInput(hoje);
-        } else {
-            customDates.forEach(el => el.style.display = 'none');
-        }
+    const params = new URLSearchParams({
+        periodo: elPeriodo.value,
+        tipo: document.getElementById('filter-tipo').value,
+        categoria: document.getElementById('category').value,
+        metodoPagamento: document.getElementById('payment-method').value,
+        descricao: document.getElementById('filter-descricao').value,
+        valorMin: document.getElementById('filter-valor-min').value,
+        valorMax: document.getElementById('filter-valor-max').value,
+        page: currentPage,
+        limit: currentLimit
     });
 
-    document.getElementById('apply-filters').addEventListener('click', function() {
-        atualizarDashboard();
-    });
-
-    // Event Listeners para exportação
-    const btnExportar = document.getElementById('export-btn');
-    if (btnExportar) {
-        btnExportar.addEventListener('click', exportarDados);
+    if(params.get('periodo') === 'custom') {
+        params.append('dataInicio', document.getElementById('start-date').value);
+        params.append('dataFim', document.getElementById('end-date').value);
     }
 
-    // Event Listeners para modal de lançamentos
-    if (btnAbrirModal) btnAbrirModal.addEventListener('click', abrirModal);
-    if (btnFecharModal) btnFecharModal.addEventListener('click', fecharModal);
-    if (btnCancelar) btnCancelar.addEventListener('click', fecharModal);
+    const res = await fetchAPI(`/dados-dashboard?${params}`);
+    if (!res) return;
+    const data = await res.json();
+
+    const fmt = v => Number(v).toLocaleString('pt-BR', {style:'currency', currency:'BRL'});
+
+    const setTxt = (id, val) => { if(document.getElementById(id)) document.getElementById(id).innerText = val; };
+    setTxt('kpi-saldo-anterior', fmt(data.kpis?.saldoAnterior || 0));
+    setTxt('kpi-saldo-atual', fmt(data.kpis?.saldoAtual || 0));
+    setTxt('kpi-entradas', fmt(data.kpis?.totalEntradas || 0));
+    setTxt('kpi-saidas', fmt(data.kpis?.totalSaidas || 0));
+    setTxt('kpi-saldo-periodo', fmt(data.kpis?.saldoPeriodo || 0));
     
-    window.addEventListener('click', function(event) {
-        if (event.target === modal) {
-            fecharModal();
-        }
-        if (event.target === editUserModal) {
-            editUserModal.classList.remove('show');
-            document.body.style.overflow = 'auto';
-        }
-    });
-
-    if (form) form.addEventListener('submit', salvarLancamento);
-
-    // Event Listeners para modal de usuários
-    if (editUserForm) {
-        editUserForm.addEventListener('submit', handleSalvarEdicaoUsuario);
-    }
-    if (editUserCloseModalBtn) {
-        editUserCloseModalBtn.addEventListener('click', () => {
-            editUserModal.classList.remove('show');
-            document.body.style.overflow = 'auto';
-        });
-    }
-    if (editUserCancelBtn) {
-        editUserCancelBtn.addEventListener('click', () => {
-            editUserModal.classList.remove('show');
-            document.body.style.overflow = 'auto';
-        });
+    const mEl = document.getElementById('kpi-margem');
+    if(mEl && data.kpis.totalEntradas) {
+        const margem = (data.kpis.saldoPeriodo / data.kpis.totalEntradas * 100);
+        mEl.innerText = margem.toFixed(1) + '%';
+        mEl.style.color = margem >= 0 ? 'var(--success)' : 'var(--danger)';
     }
 
-    // Event Listeners para navegação
-    if (navLinkDashboard) {
-        navLinkDashboard.addEventListener('click', (e) => {
-            e.preventDefault();
-            adminPage.classList.add('page-hidden');
-            perfilPage.classList.add('page-hidden');
-            dashboardPage.classList.remove('page-hidden');
+    lancamentosCache = {}; 
+    const row = (l, cls) => {
+        lancamentosCache[l.id] = l; 
+        return `<tr><td>${l.data_tabela}</td><td>${l.descricao}</td><td>${l.categoria}</td><td class="${cls}">${fmt(l.valor)}</td><td style="white-space:nowrap; text-align:center;"><button class="btn-edit" onclick="editLanc(${l.id})" title="Editar">✏️</button><button class="btn-delete" onclick="delLanc(${l.id})" title="Excluir">❌</button></td></tr>`;
+    };
 
-            navLinkAdminLi.classList.remove('active');
-            navLinkPerfilLi.classList.remove('active');
-            navLinkDashboardLi.classList.add('active');
-        });
+    const tbEnt = document.getElementById('tb-entradas'); const tbSai = document.getElementById('tb-saidas');
+    if(tbEnt) tbEnt.innerHTML = data.tabelas?.ultimasEntradas?.map(l => row(l, 'positive')).join('') || '';
+    if(tbSai) tbSai.innerHTML = data.tabelas?.ultimasSaidas?.map(l => row(l, 'negative')).join('') || '';
+
+    if (data.tabelas?.pagination) {
+        const p = data.tabelas.pagination;
+        totalPagesEntrada = Math.ceil(p.totalEntradas / p.perPage) || 1;
+        totalPagesSaida = Math.ceil(p.totalSaidas / p.perPage) || 1;
+        const maxPages = Math.max(totalPagesEntrada, totalPagesSaida);
+        const pageInfo = document.getElementById('page-info');
+        if(pageInfo) pageInfo.innerText = `Pág ${currentPage} de ${maxPages}`;
     }
 
-    if (navLinkAdmin) {
-        navLinkAdmin.addEventListener('click', (e) => {
-            e.preventDefault();
-            dashboardPage.classList.add('page-hidden');
-            perfilPage.classList.add('page-hidden');
-            adminPage.classList.remove('page-hidden');
+    if(data.graficoFluxoCaixa && data.despesas) updateCharts(data);
+}
 
-            navLinkDashboardLi.classList.remove('active');
-            navLinkPerfilLi.classList.remove('active');
-            navLinkAdminLi.classList.add('active');
-
-            carregarUsuarios();
-        });
-    }
-
-    if (navLinkPerfil) {
-        navLinkPerfil.addEventListener('click', (e) => {
-            e.preventDefault();
-            dashboardPage.classList.add('page-hidden');
-            adminPage.classList.add('page-hidden');
-            perfilPage.classList.remove('page-hidden');
-
-            navLinkDashboardLi.classList.remove('active');
-            navLinkAdminLi.classList.remove('active');
-            navLinkPerfilLi.classList.add('active');
-
-            carregarInfoPerfil();
-        });
-    }
-
-    // Event Listeners para formulários
-    if (perfilForm) {
-        perfilForm.addEventListener('submit', handleAlterarSenha);
-    }
-
-    if (adminRegisterForm) {
-        adminRegisterForm.addEventListener('submit', handleRegistroAdmin);
-    }
-
-    // Event Listeners para ordenação
-    document.querySelectorAll('th[data-sort]').forEach(th => {
-        th.addEventListener('click', handleSortHeaderClick);
-    });
-
-    // Event Listener para logout
-    const btnLogout = document.getElementById('logout-btn');
-    if (btnLogout) {
-        btnLogout.addEventListener('click', (e) => {
-            e.preventDefault();
-            if (confirm('Tem certeza que deseja sair?')) {
-                handleLogout();
-            }
-        });
-    }
-
-    // Inicialização dos gráficos
-    const cashFlowCtx = document.getElementById('cashFlowChart');
-    const expensesCtx = document.getElementById('expensesChart');
+function updateCharts(data) {
+    if (chart1) chart1.destroy();
+    if (chart2) chart2.destroy();
     
-    if (cashFlowCtx) {
-        cashFlowChart = new Chart(cashFlowCtx, {
+    const ctx1 = document.getElementById('chart-fluxo');
+    if (ctx1) {
+        chart1 = new Chart(ctx1, {
             type: 'line',
             data: {
-                labels: [],
+                labels: data.graficoFluxoCaixa.labels,
                 datasets: [
-                    {
-                        label: 'Entradas',
-                        data: [],
-                        borderColor: 'rgba(46, 204, 113, 1)',
-                        backgroundColor: 'rgba(46, 204, 113, 0.1)',
-                        tension: 0.3,
-                        fill: true
-                    },
-                    {
-                        label: 'Saídas',
-                        data: [],
-                        borderColor: 'rgba(231, 76, 60, 1)',
-                        backgroundColor: 'rgba(231, 76, 60, 0.1)',
-                        tension: 0.3,
-                        fill: true
-                    },
-                    {
-                        label: 'Saldo em Caixa',
-                        data: [],
-                        borderColor: 'rgba(52, 152, 219, 1)',
-                        backgroundColor: 'rgba(52, 152, 219, 0.1)',
-                        tension: 0.3,
-                        fill: false,
-                        borderDash: [5, 5]
-                    }
+                    { label: 'Entradas', data: data.graficoFluxoCaixa.valoresEntradas, borderColor: '#2ecc71', backgroundColor: 'rgba(46, 204, 113, 0.1)', borderWidth: 2, tension: 0.4, fill: true, pointRadius: 2.5, pointHoverRadius: 6 },
+                    { label: 'Saídas', data: data.graficoFluxoCaixa.valoresSaidas, borderColor: '#e74c3c', backgroundColor: 'rgba(231, 76, 60, 0.1)', borderWidth: 2, tension: 0.4, fill: true, pointRadius: 2.5, pointHoverRadius: 6 },
+                    { label: 'Saldo em Caixa', data: data.graficoFluxoCaixa.valoresSaldoAcumulado, borderColor: '#3498db', backgroundColor: 'rgba(52, 152, 219, 0.05)', borderWidth: 2, borderDash: [5, 5], tension: 0.4, fill: false, pointRadius: 2.5, pointHoverRadius: 6 }
                 ]
             },
-            options: {
-                responsive: true,
-                maintainAspectRatio: false,
-                plugins: {
-                    legend: {
-                        display: true,
-                        position: 'top'
-                    },
-                    tooltip: {
-                        mode: 'index',
-                        intersect: false,
-                        callbacks: {
-                            label: function(context) {
-                                return `${context.dataset.label}: ${formatarMoeda(context.raw)}`;
-                            }
-                        }
-                    }
-                },
-                scales: {
-                    y: {
-                        ticks: {
-                            callback: function(value) {
-                                return formatarMoeda(value);
-                            }
-                        }
-                    }
-                }
+            options: { 
+                responsive: true, maintainAspectRatio: false, interaction: { mode: 'index', intersect: false },
+                plugins: { legend: { position: 'top', labels: { usePointStyle: false, boxWidth: 20, boxHeight: 2 } } },
+                scales: { y: { beginAtZero: true, grid: { color: '#f0f0f0' } }, x: { grid: { display: false } } }
             }
         });
     }
 
-    if (expensesCtx) {
-        expensesChart = new Chart(expensesCtx, {
+    const ctx2 = document.getElementById('chart-desp');
+    if (ctx2) {
+        const cores = ['#e74c3c', '#3498db', '#f1c40f', '#9b59b6', '#2ecc71', '#e67e22', '#1abc9c', '#34495e', '#7f8c8d', '#c0392b'];
+        const bgColors = data.despesas.labels.map((_, i) => cores[i % cores.length]);
+        chart2 = new Chart(ctx2, {
             type: 'bar',
             data: {
-                labels: [],
-                datasets: [{
-                    label: 'Despesas',
-                    data: [],
-                    backgroundColor: []
-                }]
+                labels: data.despesas.labels,
+                datasets: [{ label: 'Total', data: data.despesas.valores, backgroundColor: bgColors, borderRadius: 4, barThickness: 'flex', maxBarThickness: 30 }]
             },
-            options: {
-                indexAxis: 'y',
-                responsive: true,
-                maintainAspectRatio: false,
-                plugins: {
-                    legend: {
-                        display: false
-                    },
-                    tooltip: {
-                        callbacks: {
-                            label: function(context) {
-                                const label = context.label || '';
-                                const valor = context.raw || 0;
-                                return `${label}: ${formatarMoeda(valor)}`;
-                            }
-                        }
-                    }
-                },
-                scales: {
-                    x: {
-                        beginAtZero: true,
-                        ticks: {
-                            callback: function(value) {
-                                return formatarMoeda(value);
-                            }
-                        }
-                    }
-                }
-            }
+            options: { indexAxis: 'y', responsive: true, maintainAspectRatio: false, plugins: { legend: { display: false } }, scales: { x: { grid: { color: '#f0f0f0' } }, y: { grid: { display: false } } } }
         });
     }
+}
+
+// --- CRUD & HELPERS ---
+window.editLanc = function(id) {
+    const l = lancamentosCache[id];
+    if(!l) return;
+    currentEditingId = id; 
+    const modal = document.getElementById('modal-lanc');
+    const title = document.getElementById('modal-title');
+    if(title) title.innerText = "Editar Lançamento";
     
-    // Carga inicial dos dados
-    atualizarDashboard();
-});
+    const radios = document.getElementsByName('tipo');
+    radios.forEach(r => r.checked = (r.value === l.tipo));
+    filterCatModal(l.tipo);
+    
+    const setVal = (id, v) => { const el = document.getElementById(id); if(el) el.value = v; };
+    setVal('m-data', l.data_input);
+    setVal('m-desc', l.descricao);
+    setVal('m-cat', l.categoria);
+    
+    const container = document.getElementById('payment-rows-container');
+    if(container) { container.innerHTML = ''; addPaymentRow(l.valor, l.metodo_pagamento); updateTotalDisplay(); }
+    
+    if(modal) { modal.classList.add('show'); modal.style.display = 'flex'; }
+};
+
+async function saveLancamento(e) {
+    e.preventDefault();
+    const tipoEl = document.querySelector('input[name="tipo"]:checked');
+    if(!tipoEl) { notify('Selecione Entrada ou Saída', 'error'); return; }
+
+    const commonData = {
+        tipo: tipoEl.value,
+        data: document.getElementById('m-data').value,
+        descricao: document.getElementById('m-desc').value,
+        categoria: document.getElementById('m-cat').value
+    };
+
+    const rows = document.querySelectorAll('.payment-row');
+    const payments = [];
+    rows.forEach(r => {
+        const val = r.querySelector('.row-val').value;
+        const met = r.querySelector('.row-method').value;
+        if(val && met) payments.push({ valor: val, metodo_pagamento: met });
+    });
+
+    if (payments.length === 0) { notify('Insira pelo menos um valor.', 'error'); return; }
+
+    const isSaida = commonData.tipo === 'Saída';
+    const confirmTitle = isSaida ? 'Confirmar SAÍDA?' : 'Confirmar ENTRADA?';
+    const confirmMsg = `Deseja salvar ${payments.length} registro(s) no total?`;
+
+    // CHAMA O MODAL PERSONALIZADO
+    showConfirm(confirmTitle, confirmMsg, isSaida, async () => {
+        if (currentEditingId) {
+            const body = { ...commonData, valor: payments[0].valor, metodo_pagamento: payments[0].metodo_pagamento };
+            const res = await fetchAPI(`/lancamento/${currentEditingId}`, { method: 'PUT', body: JSON.stringify(body) });
+            if(res && res.ok) { closeModalAndRefresh(); notify('Editado com sucesso!'); }
+            else notify('Erro ao editar', 'error');
+            return;
+        }
+
+        let successCount = 0;
+        for (let p of payments) {
+            const body = { ...commonData, valor: p.valor, metodo_pagamento: p.metodo_pagamento };
+            const res = await fetchAPI('/lancamento', { method: 'POST', body: JSON.stringify(body) });
+            if (res && res.ok) successCount++;
+        }
+
+        if(successCount > 0) { closeModalAndRefresh(); notify(`${successCount} lançamentos salvos!`); }
+        else notify('Erro ao salvar.', 'error');
+    });
+}
+
+function closeModalAndRefresh() {
+    const m = document.getElementById('modal-lanc');
+    if(m) { m.classList.remove('show'); m.style.display = 'none'; }
+    loadDashboard();
+}
+
+function filterCatModal(tipo) {
+    const sel = document.getElementById('m-cat');
+    if(!sel) return;
+    if(!tipo) { sel.innerHTML = '<option value="">Selecione o tipo primeiro</option>'; return; }
+    const opts = categoriasCache.filter(c => c.tipo === tipo).map(c => `<option value="${c.nome}">${c.nome}</option>`).join('');
+    sel.innerHTML = opts;
+    if (!currentEditingId) sel.value = "";
+}
+
+function setupNav(btnId, pageId, cb) {
+    const btn = document.getElementById(btnId);
+    if (!btn) return;
+    btn.onclick = (e) => {
+        e.preventDefault();
+        document.querySelectorAll('.page-section').forEach(p => p.style.display = 'none');
+        document.getElementById(pageId).style.display = 'block';
+        document.querySelectorAll('.nav-links li').forEach(li => li.classList.remove('active'));
+        btn.parentElement.classList.add('active');
+        if(cb) cb();
+    };
+}
+
+window.delLanc = async (id) => { 
+    showConfirm('Excluir Lançamento', 'Tem certeza que deseja apagar este item?', true, async () => { 
+        await fetchAPI(`/lancamento/${id}`, {method:'DELETE'}); 
+        notify('Item excluído!', 'error'); 
+        loadDashboard(); 
+    }); 
+};
+
+window.delUser = async (id) => { 
+    showConfirm('Excluir Usuário', 'Isso removerá o acesso do usuário. Continuar?', true, async () => { 
+        await fetchAPI(`/usuarios/${id}`, {method:'DELETE'}); 
+        notify('Usuário removido', 'error'); 
+        loadUsers(); 
+    }); 
+};
+
+window.prepEdit = (id, n, e, r) => {
+    const idField = document.getElementById('edit-user-id'); if(idField) idField.value = id;
+    const nomeField = document.getElementById('edit-user-nome'); if(nomeField) nomeField.value = n;
+    const emailField = document.getElementById('edit-user-email'); if(emailField) emailField.value = e;
+    const roleField = document.getElementById('edit-user-role'); if(roleField) roleField.value = r;
+    const m = document.getElementById('edit-user-modal'); if(m) { m.classList.add('show'); m.style.display = 'flex'; }
+};
+async function saveEditUser(e) {
+    e.preventDefault();
+    const id = document.getElementById('edit-user-id').value;
+    const body = { nome: document.getElementById('edit-user-nome').value, email: document.getElementById('edit-user-email').value, role: document.getElementById('edit-user-role').value };
+    await fetchAPI(`/usuarios/${id}`, { method:'PUT', body:JSON.stringify(body) });
+    const m = document.getElementById('edit-user-modal'); if(m) { m.classList.remove('show'); m.style.display = 'none'; }
+    notify('Usuário atualizado'); loadUsers();
+}
+async function exportCSV() {
+    const params = new URLSearchParams({ periodo: document.getElementById('filtro-periodo').value });
+    const res = await fetchAPI(`/exportar?${params}`);
+    if(res) { const b = await res.blob(); const u = window.URL.createObjectURL(b); const a=document.createElement('a'); a.href=u; a.download='export.csv'; a.click(); }
+}
+function initCharts() { if(typeof Chart === 'undefined') console.error('Chart.js missing'); }
+function loadPerfil() { 
+    const elNome = document.getElementById('perf-nome'); if(elNome) elNome.value=user.nome;
+    const elEmail = document.getElementById('perf-email'); if(elEmail) elEmail.value=user.email;
+    const elRole = document.getElementById('perf-role'); if(elRole) elRole.value=user.role;
+}
+async function changePass(e) { e.preventDefault(); const res = await fetchAPI('/perfil/alterar-senha', {method:'POST', body:JSON.stringify({senhaAtual:document.getElementById('senha-atual').value, novaSenha:document.getElementById('senha-nova').value})}); if(res&&res.ok){notify('Senha alterada'); document.getElementById('form-senha').reset();} }
+async function loadUsers() { const res=await fetchAPI('/usuarios'); if(res){ const l=await res.json(); document.getElementById('tb-users').innerHTML=l.map(u=>`<tr><td>${u.nome}</td><td>${u.email}</td><td>${u.role}</td><td><button class="btn-edit" onclick="prepEdit('${u.id}','${u.nome}','${u.email}','${u.role}')">✏️</button> <button class="btn-delete" onclick="delUser(${u.id})">❌</button></td></tr>`).join(''); }}
+async function registerUser(e) { e.preventDefault(); const res=await fetchAPI('/registrar', {method:'POST', body:JSON.stringify({nome:document.getElementById('new-nome').value, email:document.getElementById('new-email').value, senha:document.getElementById('new-senha').value})}); if(res&&res.ok){notify('Usuário criado'); document.getElementById('form-user').reset(); loadUsers();} }
+async function loadLogs() { 
+    const start = document.getElementById('log-start')?.value; const end = document.getElementById('log-end')?.value; const user = document.getElementById('log-user')?.value;
+    const params = new URLSearchParams(); if(start) params.append('startDate', start); if(end) params.append('endDate', end); if(user) params.append('user', user);
+    const res = await fetchAPI(`/logs?${params}`); if(!res) return;
+    const list = await res.json(); const tbody = document.getElementById('tb-logs'); if(tbody) tbody.innerHTML = list.map(l => `<tr><td>${new Date(l.data).toLocaleString()}</td><td>${l.usuario_nome}</td><td>${l.acao}</td><td>${l.detalhes}</td></tr>`).join('');
+}
+async function carregarCategorias() { const res = await fetchAPI('/categorias'); if (!res) return; categoriasCache = await res.json(); popularSelects(categoriasCache); }
+function popularSelects(cats) { 
+    const createOpts = (tipo) => cats.filter(c => c.tipo === tipo).map(c => `<option value="${c.nome}">${c.nome}</option>`).join('');
+    const htmlEnt = `<optgroup label="Entradas">${createOpts('Entrada')}</optgroup>`; const htmlSai = `<optgroup label="Saídas">${createOpts('Saída')}</optgroup>`;
+    const catFilter = document.getElementById('category'); if(catFilter) catFilter.innerHTML = `<option value="all">Todas as Categorias</option>` + htmlEnt + htmlSai;
+}
+function renderCatListInModal() { 
+    const tbody = document.getElementById('cat-list-tbody'); 
+    if(tbody) tbody.innerHTML = categoriasCache.map(c => `<tr><td>${c.nome}</td><td>${c.tipo}</td><td style="text-align:center;"><button class="btn-delete" type="button" onclick="deleteCat(${c.id})">❌</button></td></tr>`).join(''); 
+}
+async function saveCategoria(e) {
+    e.preventDefault(); const nome = document.getElementById('new-cat-nome').value; const tipo = document.getElementById('new-cat-tipo').value;
+    const res = await fetchAPI('/categorias', { method: 'POST', body: JSON.stringify({ nome, tipo }) });
+    if (res && res.ok) { notify('Categoria criada!'); document.getElementById('new-cat-nome').value = ''; await carregarCategorias(); renderCatListInModal(); } else { notify('Erro ao criar.', 'error'); }
+}
+window.deleteCat = async (id) => { 
+    showConfirm('Excluir Categoria', 'Tem certeza? Isso pode afetar lançamentos.', true, async () => { 
+        const res = await fetchAPI(`/categorias/${id}`, { method: 'DELETE' }); 
+        if (res && res.status === 204) { await carregarCategorias(); renderCatListInModal(); notify('Categoria excluída', 'error'); } 
+        else if (res && res.status === 409) { notify('Categoria em uso.', 'error'); } 
+        else { notify('Erro ao excluir.', 'error'); } 
+    }); 
+};

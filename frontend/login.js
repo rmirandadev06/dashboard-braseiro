@@ -3,7 +3,7 @@
  * ========================================
  */
 
-const API_URL = 'https://dashboard-braseiro-api.onrender.com/api';
+const API_URL = 'http://localhost:3001/api';
 
 document.addEventListener('DOMContentLoaded', () => {
     const loginForm = document.getElementById('login-form');

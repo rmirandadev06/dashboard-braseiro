@@ -3,428 +3,149 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Dashboard Financeiro - Restaurante</title>
-    
-    <script src="https://cdn.jsdelivr.net/npm/chart.js" defer></script>
+    <title>Dashboard - Braseiro Grill</title>
+    <link rel="icon" type="image/png" href="images/icon-brasa.png">
     <link rel="stylesheet" href="style.css">
+    
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf-autotable/3.5.29/jspdf.plugin.autotable.min.js"></script>
+    <link rel="stylesheet" type="text/css" href="https://cdn.jsdelivr.net/npm/toastify-js/src/toastify.min.css">
+    <script type="text/javascript" src="https://cdn.jsdelivr.net/npm/toastify-js"></script>
+    
+    <style>
+        /* Multi-Pagamento */
+        .payment-row { display: flex; gap: 10px; margin-bottom: 10px; align-items: center; }
+        .payment-row input, .payment-row select { flex: 1; }
+        .btn-remove-row { background: #e74c3c; color: white; border: none; width: 30px; height: 30px; border-radius: 4px; cursor: pointer; font-weight: bold; }
+        .total-display { text-align: right; font-weight: bold; font-size: 1.1rem; color: var(--primary); margin-top: 10px; border-top: 1px solid #eee; padding-top: 10px;}
+        
+        /* Paginação */
+        .pagination-container { display: flex; justify-content: center; align-items: center; margin-top: 20px; gap: 15px; padding: 10px; background: white; border-radius: 8px; box-shadow: 0 2px 5px rgba(0,0,0,0.05); }
+        .pagination-info { font-weight: bold; color: #555; }
+        .page-size-select { padding: 8px; border: 1px solid #ddd; border-radius: 4px; color: #555; background-color: #fff; cursor: pointer; }
+
+        /* MODAL DE CONFIRMAÇÃO (GIGANTE) */
+        #modal-confirm .modal-content { 
+            max-width: 550px; 
+            padding: 40px; 
+            text-align: center; 
+            border-radius: 15px;
+        }
+        #modal-confirm h3 { 
+            margin-bottom: 20px; 
+            font-size: 2rem; 
+            color: var(--primary); 
+        }
+        #modal-confirm p { 
+            margin-bottom: 35px; 
+            color: #555; 
+            font-size: 1.4rem; 
+        }
+        .confirm-actions { 
+            display: flex; 
+            justify-content: center; 
+            gap: 20px; 
+        }
+        .confirm-actions .btn { 
+            min-width: 150px; 
+            padding: 15px 0; 
+            font-size: 1.2rem; 
+            font-weight: bold; 
+        }
+    </style>
 </head>
 <body>
     <div class="container">
         <div class="sidebar">
-            <div class="logo">
-                <h1>Financeiro Braseiro Grill</h1>
-            </div>
-            
+            <div class="logo"><h1>Braseiro Grill</h1></div>
             <ul class="nav-links">
-                <li class="active" id="nav-link-dashboard-li">
-                    <a href="#" id="nav-link-dashboard">
-                        <i>📊</i> Dashboard
-                    </a>
-                </li>
-                <li style="display: block;" id="nav-link-perfil-li">
-                    <a href="#" id="nav-link-perfil">
-                        <i>👤</i> Meu Perfil
-                    </a>
-                </li>
-                <li style="display: none;" id="nav-link-admin-li">
-                    <a href="#" id="nav-link-admin">
-                        <i>👥</i> Gerenciar Usuários
-                    </a>
-                </li>
-                <li>
-                    <a href="#" id="logout-btn">
-                        <i>🚪</i> Logout
-                    </a>
-                </li>
+                <li class="active" id="nav-link-dashboard-li"><a href="#" id="menu-dashboard"><i>📊</i> Dashboard</a></li>
+                <li id="nav-link-perfil-li"><a href="#" id="menu-perfil"><i>👤</i> Meu Perfil</a></li>
+                <li id="nav-link-admin-li" style="display: none;"><a href="#" id="menu-admin"><i>👥</i> Gerenciar Usuários</a></li>
+                <li id="nav-link-logs-li" style="display: none;"><a href="#" id="menu-logs"><i>📜</i> Logs do Sistema</a></li>
+                <li><a href="#" id="btn-logout"><i>🚪</i> Logout</a></li>
             </ul>
-            
             <div class="sidebar-footer">
-                <img src="images/Logo-05.png" alt="Logo Braseiro Grill" id="footer-logo">
-                <span>© 2025 By RMiranda.dev</span>
+                <img src="images/Logo-05.png" id="footer-logo">
+                <span>© 2025 By RMiranda</span>
+                <span>Versão 2.0</span>
             </div>
         </div>
         
         <div class="main-content">
-            <div class="header">
-                <h1>Dashboard Financeiro</h1>
-                <span id="current-date">Carregando data...</span>
-            </div>
-            
-            <!-- Página de Admin (oculta por padrão) -->
-            <div id="admin-page-content" class="page-hidden">
-                <div class="admin-container">
-                    <div class="admin-form-container">
-                        <h2>Registrar Novo Usuário</h2>
-                        <form id="admin-register-form">
-                            <div class="form-group">
-                                <label for="admin-nome">Nome Completo</label>
-                                <input type="text" id="admin-nome" required>
-                            </div>
-                            <div class="form-group">
-                                <label for="admin-email">Email</label>
-                                <input type="email" id="admin-email" required>
-                            </div>
-                            <div class="form-group">
-                                <label for="admin-senha">Senha Provisória</label>
-                                <input type="password" id="admin-senha" required minlength="6">
-                            </div>
-                            <button type="submit" class="btn btn-success" id="admin-register-btn">Registrar Usuário</button>
-                            <p id="admin-register-message" class="admin-message"></p>
-                        </form>
-                    </div>
-                    
-                    <div class="admin-list-container">
-                        <h2>Usuários Cadastrados</h2>
-                        <div class="table-container" style="max-height: 400px;">
-                            <table>
-                                <thead>
-                                    <tr>
-                                        <th>Nome</th>
-                                        <th>Email</th>
-                                        <th>Permissão (Role)</th>
-                                        <th>Data de Criação</th>
-                                        <th>Ações</th>
-                                    </tr>
-                                </thead>
-                                <tbody id="admin-user-list-tbody">
-                                    <tr><td colspan="5">Carregando...</td></tr>
-                                </tbody>
-                            </table>
-                        </div>
-                    </div>
-                </div>
-            </div>
+            <div class="header"><h1>Dashboard Financeiro</h1><span id="current-date"></span></div>
 
-            <!-- Página de Perfil (oculta por padrão) -->
-            <div id="perfil-page-content" class="page-hidden">
-                <div class="perfil-container">
-                    <div class="perfil-form-container">
-                        <h2>Meu Perfil</h2>
-                        <form id="perfil-change-password-form">
-                            <p>Aqui você pode alterar sua senha de acesso.</p>
-                            <div class="form-group">
-                                <label for="perfil-senha-atual">Senha Atual</label>
-                                <input type="password" id="perfil-senha-atual" required>
-                            </div>
-                            <div class="form-group">
-                                <label for="perfil-nova-senha">Nova Senha</label>
-                                <input type="password" id="perfil-nova-senha" required minlength="6">
-                            </div>
-                            <div class="form-group">
-                                <label for="perfil-confirma-senha">Confirmar Nova Senha</label>
-                                <input type="password" id="perfil-confirma-senha" required minlength="6">
-                            </div>
-                            <button type="submit" class="btn btn-success" id="perfil-save-btn">Alterar Senha</button>
-                            <p id="perfil-message" class="admin-message"></p>
-                        </form>
-                    </div>
-
-                    <div class="perfil-info-container">
-                        <h2>Informações</h2>
-                        <div class="form-group">
-                            <label>Nome</label>
-                            <input type="text" id="perfil-info-nome" disabled>
-                        </div>
-                        <div class="form-group">
-                            <label>Email</label>
-                            <input type="text" id="perfil-info-email" disabled>
-                        </div>
-                        <div class="form-group">
-                            <label>Permissão</label>
-                            <input type="text" id="perfil-info-role" disabled>
-                        </div>
-                    </div>
-                </div>
-            </div>
-
-            <!-- Página do Dashboard (visível por padrão) -->
-            <div id="dashboard-page-content">
+            <div id="page-dashboard" class="page-section">
                 <div class="filters">
                     <div class="filter-row">
-                        <div class="filter-group action-buttons">
-                            <button class="btn btn-success" id="add-entry-btn">+ Adicionar Lançamento</button>
-                        </div>
-                        <div class="filter-group">
-                            <label for="date-range">Período</label>
-                            <select id="date-range">
-                                <option value="today">Hoje</option>
-                                <option value="week">Esta Semana</option>
-                                <option value="month" selected>Este Mês</option>
-                                <option value="custom">Personalizado</option>
-                            </select>
-                        </div>
-                        <div class="filter-group custom-dates" style="display: none;">
-                            <label for="start-date">Data Inicial</label>
-                            <input type="date" id="start-date">
-                        </div>
-                        <div class="filter-group custom-dates" style="display: none;">
-                            <label for="end-date">Data Final</label>
-                            <input type="date" id="end-date">
-                        </div>
-                        <div class="filter-group action-buttons">
-                            <button class="btn" id="apply-filters">Aplicar Filtros</button>
-                        </div>
-                        <div class="filter-group action-buttons">
-                            <button class="btn" id="export-btn">📥 Exportar (CSV)</button>
-                        </div>
+                        <div class="filter-group action-buttons"><button class="btn btn-success" id="btn-novo-lanc">+ Adicionar Lançamento</button></div>
+                        <div class="filter-group"><label>Período</label><select id="filtro-periodo"><option value="month">Este Mês</option><option value="today">Hoje</option><option value="week">Esta Semana</option><option value="custom">Personalizado</option></select></div>
+                        <div class="filter-group custom-dates" style="display: none;"><label>Início</label><input type="date" id="start-date"></div>
+                        <div class="filter-group custom-dates" style="display: none;"><label>Fim</label><input type="date" id="end-date"></div>
+                        <div class="filter-group action-buttons"><button class="btn" id="btn-atualizar">Aplicar</button></div>
+                        <div class="filter-group action-buttons" style="display: flex; gap: 5px;"><button class="btn" id="btn-exportar">CSV</button><button class="btn btn-danger" id="btn-pdf" style="background-color: #e74c3c;">PDF</button></div>
                     </div>
-                    
                     <div class="filter-row" style="margin-top: 10px;">
-                        <div class="filter-group">
-                            <label for="filter-tipo">Tipo</label>
-                            <select id="filter-tipo">
-                                <option value="all" selected>Todos os Tipos</option>
-                                <option value="Entrada">Apenas Entradas</option>
-                                <option value="Saída">Apenas Saídas</option>
-                            </select>
-                        </div>
-                        <div class="filter-group">
-                            <label for="filter-descricao">Descrição (busca)</label>
-                            <input type="text" id="filter-descricao" placeholder="Contém a palavra...">
-                        </div>
-                        <div class="filter-group">
-                            <label for="filter-valor-min">Valor Mínimo (R$)</label>
-                            <input type="number" id="filter-valor-min" placeholder="Ex: 50" step="0.01" min="0">
-                        </div>
-                        <div class="filter-group">
-                            <label for="filter-valor-max">Valor Máximo (R$)</label>
-                            <input type="number" id="filter-valor-max" placeholder="Ex: 500" step="0.01" min="0">
-                        </div>
-                        <div class="filter-group">
-                            <label for="category">Categoria</label>
-                            <select id="category">
-                                <option value="all">Todas as Categorias</option>
-                                <optgroup label="Entradas">
-                                    <option value="sales">Vendas (Salão)</option>
-                                    <option value="extra">Recebíveis Extras</option>
-                                </optgroup>
-                                <optgroup label="Saídas">
-                                        <option value="market">Mercado</option>
-                                    <option value="purchases">Compras</option>
-                                    <option value="staff">Pessoal</option>
-                                    <option value="utilities">Utilidades</option>
-                                    <option value="maintenance">Manutenção</option>
-                                    <option value="taxes">Impostos</option>
-                                    <option value="investments">Investimentos</option>
-                                    <option value="butchery">Açougue</option>
-                                    <option value="bills">Contas/Boletos</option>
-                                    <option value="salary">Pagamento Salário</option>
-                                    <option value="voucher">Pagamento Vale</option>
-                                    <option value="fuel">Combustível</option>
-                                    <option value="other">Outros</option>                                
-                                </optgroup>
-                            </select>
-                        </div>
-                        <div class="filter-group">
-                            <label for="payment-method">Forma de Pagamento</label>
-                            <select id="payment-method">
-                                <option value="all">Todas as Formas</option>
-                                <option value="cash">Dinheiro</option>
-                                <option value="card">Cartão</option>
-                                <option value="pix">Pix</option>
-                                <option value="transfer">Transferência</option>
-                                <option value="bill">Boleto</option>
-                                <option value="card-pix">Cartão + Pix</option>
-                                <option value="other">Outro</option>
-                            </select>
-                        </div>
+                        <div class="filter-group"><label>Tipo</label><select id="filter-tipo"><option value="all">Todos</option><option value="Entrada">Entradas</option><option value="Saída">Saídas</option></select></div>
+                        <div class="filter-group"><label>Descrição</label><input type="text" id="filter-descricao" placeholder="Buscar..."></div>
+                        <div class="filter-group"><label>Min R$</label><input type="number" id="filter-valor-min"></div>
+                        <div class="filter-group"><label>Max R$</label><input type="number" id="filter-valor-max"></div>
+                        <div class="filter-group"><label>Categoria</label><select id="category"><option value="all">Todas</option></select></div>
+                        <div class="filter-group"><label>Pagamento</label><select id="payment-method"><option value="all">Todas</option><option value="cash">Dinheiro</option><option value="card">Cartão</option><option value="pix">Pix</option><option value="transfer">Transferência</option><option value="bill">Boleto</option><option value="card-pix">Cartão+Pix</option><option value="other">Outro</option></select></div>
                     </div>
                 </div>
-                
+
                 <div id="kpi-container">
                     <div class="cards">
-                        <div class="card saldo-anterior">
-                            <h3>Saldo Anterior</h3>
-                            <div class="value">R$ 0,00</div>
-                            <div class="change">Acumulado até o início</div>
-                        </div>
-                        <div class="card saldo-atual">
-                            <h3>Saldo Atual em Caixa</h3>
-                            <div class="value">R$ 0,00</div>
-                            <div class="change">Balanço Total Acumulado</div>
-                        </div>
-                        <div class="card entradas">
-                            <h3>Entradas (do Período)</h3>
-                            <div class="value">R$ 0,00</div>
-                            <div class="change">Filtro de data atual</div>
-                        </div>
-                        <div class="card saidas">
-                            <h3>Saídas (do Período)</h3>
-                            <div class="value">R$ 0,00</div>
-                            <div class="change">Filtro de data atual</div>
-                        </div>
-                        <div class="card saldo">
-                            <h3>Saldo (do Período)</h3>
-                            <div class="value">R$ 0,00</div>
-                            <div class="change">Resultado do período</div>
-                        </div>
-                        <div class="card margem">
-                            <h3>Margem (do Período)</h3>
-                            <div class="value">0,0%</div>
-                            <div class="change">Lucro / Entradas</div>
-                        </div>
+                        <div class="card saldo-anterior"><h3>Saldo Anterior</h3><div class="value" id="kpi-saldo-anterior">R$ 0,00</div></div>
+                        <div class="card saldo-atual"><h3>Saldo Atual</h3><div class="value" id="kpi-saldo-atual">R$ 0,00</div></div>
+                        <div class="card entradas"><h3>Entradas</h3><div class="value" id="kpi-entradas">R$ 0,00</div></div>
+                        <div class="card saidas"><h3>Saídas</h3><div class="value" id="kpi-saidas">R$ 0,00</div></div>
+                        <div class="card saldo"><h3>Saldo</h3><div class="value" id="kpi-saldo-periodo">R$ 0,00</div></div>
+                        <div class="card margem"><h3>Margem</h3><div class="value" id="kpi-margem">0,0%</div></div>
                     </div>
                 </div>
-                
-                <div id="charts-container">
-                    <div class="charts">
-                        <div class="chart-container">
-                            <h2>Fluxo de Caixa (Linha do Tempo)</h2>
-                            <canvas id="cashFlowChart"></canvas>
-                        </div>
-                        <div class="chart-container">
-                            <h2>Top Despesas por Categoria</h2>
-                            <canvas id="expensesChart"></canvas>
-                        </div>
-                    </div>
+
+                <div class="charts">
+                    <div class="chart-container"><h2>Fluxo de Caixa</h2><canvas id="chart-fluxo"></canvas></div>
+                    <div class="chart-container"><h2>Despesas</h2><canvas id="chart-desp"></canvas></div>
                 </div>
-                
+
                 <div class="tables">
-                    <div class="table-container">
-                        <h2>Lançamentos de Entrada (do Período)</h2>
-                        <table>
-                            <thead>
-                                <tr>
-                                    <th data-sort="data">Data</th>
-                                    <th>Descrição</th>
-                                    <th>Categoria</th>
-                                    <th data-sort="valor">Valor</th>
-                                    <th>Ações</th>
-                                </tr>
-                            </thead>
-                            <tbody>
-                                <tr><td colspan="5">Nenhum lançamento encontrado</td></tr>
-                            </tbody>
-                        </table>
-                    </div>
-                    <div class="table-container">
-                        <h2>Lançamentos de Saída (do Período)</h2>
-                        <table>
-                            <thead>
-                                <tr>
-                                    <th data-sort="data">Data</th>
-                                    <th>Descrição</th>
-                                    <th>Categoria</th>
-                                    <th data-sort="valor">Valor</th>
-                                    <th>Ações</th>
-                                </tr>
-                            </thead>
-                            <tbody>
-                                <tr><td colspan="5">Nenhum lançamento encontrado</td></tr>
-                            </tbody>
-                        </table>
-                    </div>
+                    <div class="table-container"><h2>Entradas</h2><table><thead><tr><th>Data</th><th>Descrição</th><th>Categoria</th><th>Valor</th><th>Ações</th></tr></thead><tbody id="tb-entradas"></tbody></table></div>
+                    <div class="table-container"><h2>Saídas</h2><table><thead><tr><th>Data</th><th>Descrição</th><th>Categoria</th><th>Valor</th><th>Ações</th></tr></thead><tbody id="tb-saidas"></tbody></table></div>
+                </div>
+
+                <div class="pagination-container">
+                    <select id="items-per-page" class="page-size-select"><option value="10">10 por pág</option><option value="20">20 por pág</option><option value="50" selected>50 por pág</option><option value="100">100 por pág</option></select>
+                    <button class="btn btn-secondary" id="btn-prev-page">Anterior</button><span class="pagination-info" id="page-info">Pág 1</span><button class="btn btn-secondary" id="btn-next-page">Próxima</button>
                 </div>
             </div>
+
+            <div id="page-perfil" class="page-section" style="display: none;"><div class="perfil-container"><div class="perfil-info-container"><h2>Informações</h2><div class="form-group"><label>Nome</label><input type="text" id="perf-nome" disabled></div><div class="form-group"><label>Email</label><input type="text" id="perf-email" disabled></div><div class="form-group"><label>Permissão</label><input type="text" id="perf-role" disabled></div></div><div class="perfil-form-container"><h2>Meu Perfil</h2><form id="form-senha"><div class="form-group"><label>Senha Atual</label><input type="password" id="senha-atual" required></div><div class="form-group"><label>Nova Senha</label><input type="password" id="senha-nova" required></div><button type="submit" class="btn btn-success">Alterar Senha</button></form></div></div></div>
+            <div id="page-admin" class="page-section" style="display: none;"><div class="admin-container"><div class="admin-form-container"><h2>Novo Usuário</h2><form id="form-user"><div class="form-group"><label>Nome</label><input type="text" id="new-nome" required></div><div class="form-group"><label>Email</label><input type="email" id="new-email" required></div><div class="form-group"><label>Senha</label><input type="password" id="new-senha" required></div><button type="submit" class="btn btn-success">Registrar</button></form></div><div class="admin-list-container"><div class="table-container"><table><thead><tr><th>Nome</th><th>Email</th><th>Permissão</th><th>Ações</th></tr></thead><tbody id="tb-users"></tbody></table></div></div></div></div>
+            <div id="page-logs" class="page-section" style="display: none;"><div class="filters" style="margin-bottom: 20px;"><div class="filter-row"><div class="filter-group"><label>Data Início</label><input type="date" id="log-start"></div><div class="filter-group"><label>Data Fim</label><input type="date" id="log-end"></div><div class="filter-group"><label>Usuário</label><input type="text" id="log-user" placeholder="Buscar..."></div><div class="filter-group action-buttons" style="align-self: flex-end;"><button class="btn" id="btn-filter-logs">Filtrar</button></div></div></div><div class="table-container"><h2>Logs</h2><table><thead><tr><th>Data</th><th>Usuário</th><th>Ação</th><th>Detalhes</th></tr></thead><tbody id="tb-logs"></tbody></table></div></div>
         </div>
     </div>
 
-    <!-- Modal para Adicionar/Editar Lançamentos -->
-    <div id="entry-modal" class="modal-backdrop" role="dialog" aria-labelledby="modal-title" aria-hidden="true">
-        <div class="modal-content" role="document">
-            <div class="modal-header">
-                <h2 id="modal-title">Adicionar Novo Lançamento</h2>
-                <button id="close-modal-btn" class="close-btn" aria-label="Fechar modal">&times;</button>
-            </div>
-            <form id="entry-form" class="modal-body">
-                <div class="form-group full-width">
-                    <label>Tipo de Lançamento</label>
-                    <div class="radio-group" role="radiogroup" aria-label="Tipo de lançamento">
-                        <label><input type="radio" name="tipo" value="Entrada" id="tipo-entrada" checked> Entrada</label>
-                        <label><input type="radio" name="tipo" value="Saída" id="tipo-saida"> Saída</label>
-                    </div>
-                </div>
-                <div class="form-grid">
-                    <div class="form-group">
-                        <label for="form-data">Data</label>
-                        <input type="date" id="form-data" name="form-data" required>
-                    </div>
-                    <div class="form-group">
-                        <label for="form-valor">Valor (R$)</label>
-                        <input type="number" id="form-valor" name="form-valor" step="0.01" placeholder="Ex: 150.75" required min="0.01">
-                    </div>
-                    <div class="form-group full-width">
-                        <label for="form-descricao">Descrição</label>
-                        <input type="text" id="form-descricao" name="form-descricao" placeholder="Ex: Compra de carnes" required>
-                    </div>
-                    <div class="form-group">
-                        <label for="form-categoria">Categoria</label>
-                        <select id="form-categoria" name="form-categoria" required>
-                            <option value="" disabled selected>Selecione...</option>
-                            <optgroup label="Entradas">
-                                <option value="sales">Vendas (Salão)</option>
-                                <option value="extra">Recebíveis Extras</option>
-                            </optgroup>
-                            <optgroup label="Saídas">
-                                <option value="market">Mercado</option>
-                                <option value="purchases">Compras</option>
-                                <option value="staff">Pessoal</option>
-                                <option value="utilities">Utilidades</option>
-                                <option value="maintenance">Manutenção</option>
-                                <option value="taxes">Impostos</option>
-                                <option value="investments">Investimentos</option>
-                                <option value="butchery">Açougue</option>
-                                <option value="bills">Contas/Boletos</option>
-                                <option value="salary">Pagamento Salário</option>
-                                <option value="voucher">Pagamento Vale</option>
-                                <option value="fuel">Combustível</option>
-                                <option value="other">Outros</option>
-                            </optgroup>
-                        </select>
-                    </div>
-                    <div class="form-group">
-                        <label for="form-metodo">Método de Pagamento</label>
-                        <select id="form-metodo" name="form-metodo" required>
-                            <option value="" disabled selected>Selecione...</option>
-                            <option value="cash">Dinheiro</option>
-                            <option value="card">Cartão</option>
-                            <option value="pix">Pix</option>
-                            <option value="transfer">Transferência</option>
-                            <option value="bill">Boleto</option>
-                            <option value="card-pix">Cartão + Pix</option>
-                            <option value="other">Outro</option>
-                        </select>
-                    </div>
-                </div>
-            </form>
-            <div class="modal-footer">
-                <button type="button" id="cancel-btn" class="btn btn-secondary">Cancelar</button>
-                <button type="submit" id="save-btn" form="entry-form" class="btn btn-success">Salvar Lançamento</button>
-            </div>
-        </div>
+    <div id="modal-lanc" class="modal-backdrop" style="display: none;">
+        <div class="modal-content"><div class="modal-header"><h2 id="modal-title">Adicionar Novo Lançamento</h2><button id="btn-close-modal" class="close-btn">&times;</button></div><form id="form-lanc" class="modal-body"><div class="form-group full-width"><label>Tipo de Lançamento</label><div class="radio-group"><label><input type="radio" name="tipo" value="Entrada" required> Entrada</label><label><input type="radio" name="tipo" value="Saída" required> Saída</label></div></div><div class="form-grid"><div class="form-group"><label>Data</label><input type="date" id="m-data" required></div><div class="form-group full-width"><label>Descrição</label><input type="text" id="m-desc" required></div><div class="form-group"><label>Categoria</label><div style="display:flex; gap:5px;"><select id="m-cat" required style="flex-grow:1;"></select><button type="button" id="btn-add-cat" class="btn btn-secondary" style="padding: 0 10px; font-weight:bold;">+</button></div></div></div><div class="form-group full-width" style="margin-top: 15px;"><label>Valores e Formas de Pagamento</label><div id="payment-rows-container"></div><button type="button" id="btn-add-payment-row" class="btn btn-secondary" style="margin-top: 5px; width: 100%; font-size: 0.9rem;">+ Adicionar outra forma de pagamento</button><div class="total-display">Total: R$ <span id="m-total-display">0,00</span></div></div><div class="modal-footer"><button type="button" id="btn-cancel-modal" class="btn btn-secondary">Cancelar</button><button type="submit" class="btn btn-success">Salvar Lançamento</button></div></form></div>
     </div>
-    
-    <!-- Modal para Editar Usuários -->
-    <div id="edit-user-modal" class="modal-backdrop" role="dialog" aria-labelledby="edit-user-modal-title" aria-hidden="true">
-        <div class="modal-content" role="document">
-            <div class="modal-header">
-                <h2 id="edit-user-modal-title">Editar Usuário</h2>
-                <button id="edit-user-close-modal-btn" class="close-btn" aria-label="Fechar modal">&times;</button>
-            </div>
-            
-            <form id="edit-user-form" class="modal-body">
-                <input type="hidden" id="edit-user-id">
-                <div class="form-group">
-                    <label for="edit-user-nome">Nome Completo</label>
-                    <input type="text" id="edit-user-nome" required>
-                </div>
-                <div class="form-group">
-                    <label for="edit-user-email">Email</label>
-                    <input type="email" id="edit-user-email" required>
-                </div>
-                <div class="form-group">
-                    <label for="edit-user-role">Permissão (Role)</label>
-                    <select id="edit-user-role" required>
-                        <option value="simples">Usuário Simples</option>
-                        <option value="admin">Administrador</option>
-                    </select>
-                </div>
-                <p id="edit-user-message" class="admin-message" style="margin-top: 0;"></p>
-            </form>
-            
-            <div class="modal-footer">
-                <button type="button" id="edit-user-cancel-btn" class="btn btn-secondary">Cancelar</button>
-                <button type="submit" id="edit-user-save-btn" form="edit-user-form" class="btn btn-success">Salvar Alterações</button>
+    <div id="modal-new-cat" class="modal-backdrop" style="display: none;">
+        <div class="modal-content" style="max-width: 500px;"><div class="modal-header"><h2>Gerenciar Categorias</h2><button id="btn-close-cat" class="close-btn">&times;</button></div><div class="modal-body"><form id="form-new-cat" style="border-bottom: 1px solid #eee; padding-bottom: 15px; margin-bottom: 15px;"><div class="form-grid"><div class="form-group"><label>Nome</label><input type="text" id="new-cat-nome" required></div><div class="form-group"><label>Tipo</label><select id="new-cat-tipo"><option value="Entrada">Entrada</option><option value="Saída">Saída</option></select></div></div><button type="submit" class="btn btn-success" style="width:100%; margin-top:10px;">Salvar Nova Categoria</button></form><div id="cat-list-container" style="max-height: 250px; overflow-y: auto;"><table style="font-size: 0.9rem;"><thead><tr><th>Nome</th><th>Tipo</th><th>Ação</th></tr></thead><tbody id="cat-list-tbody"></tbody></table></div></div></div>
+    </div>
+    <div id="edit-user-modal" class="modal-backdrop" style="display: none;">
+        <div class="modal-content"><div class="modal-header"><h2>Editar Usuário</h2><button id="edit-user-close-modal-btn" class="close-btn">&times;</button></div><form id="edit-user-form" class="modal-body"><input type="hidden" id="edit-user-id"><div class="form-group"><label>Nome</label><input type="text" id="edit-user-nome" required></div><div class="form-group"><label>Email</label><input type="email" id="edit-user-email" required></div><div class="form-group"><label>Permissão</label><select id="edit-user-role"><option value="simples">Usuário Simples</option><option value="admin">Administrador</option></select></div><div class="modal-footer"><button type="button" id="edit-user-cancel-btn" class="btn btn-secondary">Cancelar</button><button type="submit" id="edit-user-save-btn" class="btn btn-success">Salvar Alterações</button></div></form></div>
+    </div>
+
+    <div id="modal-confirm" class="modal-backdrop" style="display: none;">
+        <div class="modal-content">
+            <h3 id="confirm-title">Confirmação</h3>
+            <p id="confirm-msg">Tem certeza?</p>
+            <div class="confirm-actions">
+                <button class="btn btn-secondary" id="btn-confirm-no">Cancelar</button>
+                <button class="btn btn-danger" id="btn-confirm-yes">Confirmar</button>
             </div>
         </div>
     </div>
