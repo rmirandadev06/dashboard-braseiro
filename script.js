@@ -1,11 +1,7 @@
-// --- CONFIGURAÇÃO DE CONEXÃO ---
-// Troque o link abaixo pelo link do seu serviço NODE no Render (sem a barra / no final)
-const RENDER_URL = 'https://dashboard-braseiro-api.onrender.com'; 
-
+// CONFIGURAÇÃO AUTOMÁTICA DE URL
+// Se estiver no seu PC, usa localhost. Se estiver na nuvem, usa o endereço relativo.
 const isLocal = window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1';
-
-// Se for local, usa localhost:3001. Se for online, usa o link do Render + /api
-const API_URL = isLocal ? 'http://localhost:3001/api' : `${RENDER_URL}/api`;
+const API_URL = isLocal ? 'http://localhost:3001/api' : '/api';
 
 // --- AUTH & INIT ---
 const token = localStorage.getItem('authToken');
