@@ -1,0 +1,63 @@
+https://gemini.google.com/share/5eb2b8c470e7
+📂 1. Estrutura do Projeto (Unificada)
+Para funcionar no Render de forma simples, removemos as pastas separadas frontend e backend. Agora, tudo vive na Raiz do projeto.
+
+server.js: O "cérebro". Agora ele serve tanto a API quanto os arquivos visuais (HTML/CSS) usando express.static.
+
+index.html: O "rosto". Contém os links para as libs (Toastify, jsPDF, Chart.js) e o CSS do novo Modal Gigante.
+
+script.js: A "lógica". Possui a detecção automática de ambiente (isLocal) e corrige o bug de exibir os dois campos de data.
+
+db.js: A "conexão". Configurado com SSL obrigatório para o Supabase.
+
+package.json: O "manual de instruções" para o Render saber o que instalar.
+
+✨ 2. Funcionalidades Implementadas
+Relatório PDF Profissional: Botão vermelho que gera um PDF com cabeçalho, logo, resumo financeiro, gráficos em alta resolução e tabelas coloridas.
+
+Notificações (Toasts): Balões verdes e vermelhos grandes e animados para avisar de sucessos ou erros.
+
+Confirmação de Segurança: Um modal grande pergunta "Tem certeza?" antes de excluir ou salvar lançamentos críticos.
+
+Paginação: Tabela agora mostra 50 itens por página (configurável), com botões de "Anterior" e "Próxima".
+
+Multi-Pagamento: Possibilidade de adicionar várias formas de pagamento em um único lançamento.
+
+Filtro de Data Corrigido: Agora, ao selecionar "Personalizado", aparecem corretamente os campos "Início" e "Fim".
+
+☁️ 3. Configurações de Nuvem (Render + Supabase)
+Se precisar configurar de novo, lembre-se destes detalhes cruciais:
+
+Variáveis de Ambiente (Environment):
+
+DATABASE_URL: O link do Supabase (postgres://...) SEM ASPAS.
+
+JWT_SECRET: Sua senha de segurança.
+
+Comandos de Build/Start:
+
+Root Directory: (Em branco)
+
+Build Command: npm install
+
+Start Command: node server.js
+
+Conexão Inteligente (script.js e login.js):
+
+O código detecta automaticamente: se for localhost, usa a porta 3001. Se for nuvem, usa o caminho relativo /api.
+
+🛠️ 4. Guia Rápido: Como Atualizar no Futuro
+Sempre que você fizer uma alteração no seu computador (VS Code), siga estes 3 passos para mandar para o site oficial:
+
+Passo 1: Salvar e Testar Teste no seu computador rodando node server.js e acessando localhost:3001.
+
+Passo 2: Empacotar (No Terminal)
+
+Bash
+git add .
+git commit -m "Escreva aqui o que você mudou"
+Passo 3: Enviar para o Ar
+
+Bash
+git push -f origin main
+(O -f garante que a sua versão local sempre substitua a da nuvem).

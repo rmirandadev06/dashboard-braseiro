@@ -60,7 +60,7 @@ function showConfirm(title, message, isDanger, callback) {
     msgEl.innerText = message;
     
     btnYes.style.backgroundColor = isDanger ? '#e74c3c' : '#2ecc71';
-    btnYes.innerText = isDanger ? 'Confirmar' : 'Confirmar'; // Pode personalizar o texto se quiser
+    btnYes.innerText = isDanger ? 'Confirmar' : 'Confirmar'; 
 
     modal.classList.add('show');
     modal.style.display = 'flex';
@@ -131,8 +131,11 @@ function startApp() {
     // Dashboard
     const btnAtualizar = document.getElementById('btn-atualizar');
     if(btnAtualizar) btnAtualizar.onclick = () => { currentPage = 1; loadDashboard(); };
+    
+    // ATENÇÃO: Aqui conectamos a nova função de exportar
     const btnExportar = document.getElementById('btn-exportar');
     if(btnExportar) btnExportar.onclick = exportCSV;
+    
     const btnPdf = document.getElementById('btn-pdf');
     if(btnPdf) btnPdf.onclick = exportPDF;
     
@@ -498,11 +501,38 @@ async function saveEditUser(e) {
     const m = document.getElementById('edit-user-modal'); if(m) { m.classList.remove('show'); m.style.display = 'none'; }
     notify('Usuário atualizado'); loadUsers();
 }
-async function exportCSV() {
-    const params = new URLSearchParams({ periodo: document.getElementById('filtro-periodo').value });
-    const res = await fetchAPI(`/exportar?${params}`);
-    if(res) { const b = await res.blob(); const u = window.URL.createObjectURL(b); const a=document.createElement('a'); a.href=u; a.download='export.csv'; a.click(); }
+
+// --- FUNÇÃO EXPORTAR CSV (ATUALIZADA) ---
+function exportCSV() {
+    const dataToExport = Object.values(lancamentosCache);
+    if (dataToExport.length === 0) { notify("Nenhum dado na tela para exportar.", "error"); return; }
+
+    const headers = ["ID", "Data", "Tipo", "Descrição", "Categoria", "Forma de Pagamento", "Valor (R$)"];
+    const rows = dataToExport.map(t => {
+        const valorFormatado = parseFloat(t.valor).toFixed(2).replace('.', ',');
+        return [
+            t.id,
+            t.data_tabela, 
+            t.tipo,
+            `"${t.descricao}"`, 
+            t.categoria,
+            t.metodo_pagamento || '-',
+            valorFormatado
+        ].join(';'); 
+    });
+
+    const csvContent = "\uFEFF" + [headers.join(';'), ...rows].join('\n');
+    const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+    const url = window.URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    const dateStr = new Date().toLocaleDateString('pt-BR').replace(/\//g, '-');
+    link.setAttribute("href", url);
+    link.setAttribute("download", `Relatorio_Braseiro_${dateStr}.csv`);
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
 }
+
 function initCharts() { if(typeof Chart === 'undefined') console.error('Chart.js missing'); }
 function loadPerfil() { 
     const elNome = document.getElementById('perf-nome'); if(elNome) elNome.value=user.nome;
