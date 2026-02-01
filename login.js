@@ -3,7 +3,10 @@
  * ========================================
  */
 
-const API_URL = 'http://localhost:3001/api';
+// CONFIGURAÇÃO DE URL INTELIGENTE
+// Se estiver no PC, usa localhost. Se estiver no Render, usa o link do site.
+const isLocal = window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1';
+const API_URL = isLocal ? 'http://localhost:3001/api' : '/api';
 
 document.addEventListener('DOMContentLoaded', () => {
     const loginForm = document.getElementById('login-form');
