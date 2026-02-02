@@ -48,7 +48,7 @@ function notify(msg, type = 'success') {
     }).showToast();
 }
 
-// --- MODAL DE CONFIRMAÇÃO GIGANTE ---
+// --- MODAL DE CONFIRMAÇÃO ---
 function showConfirm(title, message, isDanger, callback) {
     const modal = document.getElementById('modal-confirm');
     const titleEl = document.getElementById('confirm-title');
@@ -59,24 +59,40 @@ function showConfirm(title, message, isDanger, callback) {
     titleEl.innerText = title;
     msgEl.innerText = message;
     
+    // Configura a cor do botão (Verde ou Vermelho)
     btnYes.style.backgroundColor = isDanger ? '#e74c3c' : '#2ecc71';
-    btnYes.innerText = isDanger ? 'Confirmar' : 'Confirmar'; 
+    btnYes.innerText = 'Confirmar'; // Ou 'Sim', se preferir
 
+    // Abre o Modal
     modal.classList.add('show');
     modal.style.display = 'flex';
 
-    btnYes.onclick = null;
-    btnNo.onclick = null;
+    // --- NOVO: FOCA NO BOTÃO DE CONFIRMAR ---
+    // Isso permite apertar ENTER direto para aceitar
+    btnYes.focus();
 
-    btnYes.onclick = () => {
+    // --- NOVO: SUPORTE A TECLA ESC (CANCELAR) ---
+    const handleKey = (e) => {
+        if (e.key === 'Escape') btnNo.click();
+    };
+    document.addEventListener('keydown', handleKey);
+
+    // Função para limpar tudo ao fechar
+    const close = () => {
         modal.classList.remove('show');
         modal.style.display = 'none';
+        document.removeEventListener('keydown', handleKey); // Remove o "espião" do teclado
+        btnYes.onclick = null;
+        btnNo.onclick = null;
+    };
+
+    btnYes.onclick = () => {
+        close();
         callback();
     };
 
     btnNo.onclick = () => {
-        modal.classList.remove('show');
-        modal.style.display = 'none';
+        close();
     };
 }
 
@@ -184,11 +200,10 @@ async function fetchAPI(url, opts = {}) {
 }
 
 // --- EXPORT PDF ---
-// --- FUNÇÃO EXPORTAR PDF (BUSCA TUDO DO BANCO) ---
 async function exportPDF() {
     notify("Gerando PDF completo... Aguarde.", "info");
 
-    // 1. Prepara a busca COMPLETA (igual ao CSV)
+    // 1. Prepara a busca COMPLETA
     const elPeriodo = document.getElementById('filtro-periodo');
     const params = new URLSearchParams({
         periodo: elPeriodo.value,
@@ -199,7 +214,7 @@ async function exportPDF() {
         valorMin: document.getElementById('filter-valor-min').value,
         valorMax: document.getElementById('filter-valor-max').value,
         page: 1,
-        limit: 100000 // TRUQUE: Pede tudo para o servidor
+        limit: 100000 
     });
 
     if(params.get('periodo') === 'custom') {
@@ -219,49 +234,50 @@ async function exportPDF() {
     const greenColor = [46, 204, 113]; 
     const redColor = [231, 76, 60];      
     
-    // --- CABEÇALHO E LOGO ---
+    // --- CABEÇALHO ---
     const logoImg = document.getElementById('footer-logo');
     let startY = 15;
     if (logoImg && logoImg.complete) {
         try {
             const canvas = document.createElement("canvas"); 
-            canvas.width = logoImg.naturalWidth; 
-            canvas.height = logoImg.naturalHeight;
-            const ctx = canvas.getContext("2d"); 
-            ctx.drawImage(logoImg, 0, 0); 
+            canvas.width = logoImg.naturalWidth; canvas.height = logoImg.naturalHeight;
+            const ctx = canvas.getContext("2d"); ctx.drawImage(logoImg, 0, 0); 
             const logoData = canvas.toDataURL("image/png");
             doc.addImage(logoData, 'PNG', 14, 10, 30, (logoImg.naturalHeight * 30) / logoImg.naturalWidth);
-            
             doc.setFontSize(22); doc.setTextColor(...primaryColor); doc.text("Relatório Financeiro", 50, 20);
             doc.setFontSize(14); doc.text("Braseiro Grill", 50, 28);
             doc.setFontSize(10); doc.setTextColor(100); doc.text(`Gerado em: ${new Date().toLocaleString('pt-BR')}`, 50, 35);
             startY = 45;
-        } catch (e) { 
-            doc.setFontSize(22); doc.text("Relatório", 14, 20); startY = 40; 
-        }
-    } else { 
-        doc.setFontSize(22); doc.setTextColor(...primaryColor); doc.text("Relatório", 14, 20); startY = 40; 
-    }
+        } catch (e) { doc.setFontSize(22); doc.text("Relatório", 14, 20); startY = 40; }
+    } else { doc.setFontSize(22); doc.setTextColor(...primaryColor); doc.text("Relatório", 14, 20); startY = 40; }
 
     let finalY = startY;
 
     // --- RESUMO (KPIS) ---
-    // Usamos os dados vindos do servidor para garantir precisão
     const fmt = v => Number(v).toLocaleString('pt-BR', {style:'currency', currency:'BRL'});
     
-    doc.setFontSize(12); doc.setTextColor(0); doc.text(`Resumo do Período Selecionado:`, 14, finalY);
+    doc.setFontSize(12); doc.setTextColor(0); doc.text(`Resumo Financeiro:`, 14, finalY);
     doc.setFontSize(10); 
-    doc.setTextColor(...greenColor); doc.text(`Entradas: ${fmt(data.kpis.totalEntradas)}`, 14, finalY + 6);
-    doc.setTextColor(...redColor); doc.text(`Saídas: ${fmt(data.kpis.totalSaidas)}`, 80, finalY + 6);
-    doc.setTextColor(...primaryColor); doc.text(`Saldo: ${fmt(data.kpis.saldoPeriodo)}`, 140, finalY + 6);
+    
+    // Entradas
+    doc.setTextColor(...greenColor); 
+    doc.text(`Entradas: ${fmt(data.kpis.totalEntradas)}`, 14, finalY + 6);
+    
+    // Saídas
+    doc.setTextColor(...redColor); 
+    doc.text(`Saídas: ${fmt(data.kpis.totalSaidas)}`, 70, finalY + 6); // Ajustei posiçao X
+    
+    // Saldo Atual (Ajustado aqui!)
+    doc.setTextColor(...primaryColor); 
+    // Mudei de data.kpis.saldoPeriodo para data.kpis.saldoAtual
+    doc.text(`Saldo Atual: ${fmt(data.kpis.saldoAtual)}`, 130, finalY + 6); 
+    
     finalY += 15;
 
-    // --- GRÁFICOS (CAPTURA DA TELA) ---
-    // Gráficos precisam ser capturados da tela pois são canvas
+    // --- GRÁFICOS ---
     const getSharpImage = (chartInstance) => {
         if (!chartInstance) return null;
         const canvas = chartInstance.canvas; const w = canvas.width; const h = canvas.height;
-        // Aumenta resolução para o PDF não ficar borrado
         canvas.width = w * 4; canvas.height = h * 4;
         const anim = chartInstance.options.animation; chartInstance.options.animation = false; chartInstance.resize(); 
         const imgData = canvas.toDataURL('image/png', 1.0);
@@ -270,69 +286,27 @@ async function exportPDF() {
     };
 
     if (chart1 && chart2) {
-        const imgFluxo = getSharpImage(chart1); 
-        const imgDesp = getSharpImage(chart2);
-        
-        if(imgFluxo) { 
-            doc.setFontSize(12); doc.setTextColor(0); doc.text("Fluxo de Caixa", 14, finalY); 
-            doc.addImage(imgFluxo, 'PNG', 14, finalY + 2, 180, 70); 
-            finalY += 80; 
-        }
-        
+        const imgFluxo = getSharpImage(chart1); const imgDesp = getSharpImage(chart2);
+        if(imgFluxo) { doc.setFontSize(12); doc.setTextColor(0); doc.text("Fluxo de Caixa", 14, finalY); doc.addImage(imgFluxo, 'PNG', 14, finalY + 2, 180, 70); finalY += 80; }
         if (finalY > 180) { doc.addPage(); finalY = 20; }
-        
-        if(imgDesp) { 
-            doc.text("Despesas por Categoria", 14, finalY); 
-            doc.addImage(imgDesp, 'PNG', 14, finalY + 2, 180, 70); 
-            finalY += 80; 
-        }
+        if(imgDesp) { doc.text("Despesas por Categoria", 14, finalY); doc.addImage(imgDesp, 'PNG', 14, finalY + 2, 180, 70); finalY += 80; }
     }
 
-    // --- TABELAS (DOS DADOS COMPLETOS) ---
+    // --- TABELAS ---
     if (finalY > 220) { doc.addPage(); finalY = 20; } else finalY += 10;
 
-    // Prepara os arrays de Entradas
-    const rowsEntradas = (data.tabelas?.ultimasEntradas || []).map(t => [
-        t.data_tabela,
-        t.descricao,
-        t.categoria,
-        fmt(t.valor)
-    ]);
-
+    const rowsEntradas = (data.tabelas?.ultimasEntradas || []).map(t => [t.data_tabela, t.descricao, t.categoria, fmt(t.valor)]);
     if (rowsEntradas.length > 0) { 
         doc.setFontSize(14); doc.setTextColor(...greenColor); doc.text("Detalhamento de Entradas", 14, finalY); 
-        doc.autoTable({ 
-            startY: finalY + 5, 
-            head: [['Data', 'Descrição', 'Categoria', 'Valor']], 
-            body: rowsEntradas, 
-            theme: 'grid', 
-            headStyles: { fillColor: greenColor }, 
-            styles: { fontSize: 9 }, 
-            columnStyles: { 3: { halign: 'right', fontStyle: 'bold' } } 
-        }); 
+        doc.autoTable({ startY: finalY + 5, head: [['Data', 'Descrição', 'Categoria', 'Valor']], body: rowsEntradas, theme: 'grid', headStyles: { fillColor: greenColor }, styles: { fontSize: 9 }, columnStyles: { 3: { halign: 'right', fontStyle: 'bold' } } }); 
         finalY = doc.lastAutoTable.finalY + 15; 
     }
     
-    // Prepara os arrays de Saídas
-    const rowsSaidas = (data.tabelas?.ultimasSaidas || []).map(t => [
-        t.data_tabela,
-        t.descricao,
-        t.categoria,
-        fmt(t.valor)
-    ]);
-
+    const rowsSaidas = (data.tabelas?.ultimasSaidas || []).map(t => [t.data_tabela, t.descricao, t.categoria, fmt(t.valor)]);
     if (rowsSaidas.length > 0) { 
         if (finalY > 250) { doc.addPage(); finalY = 20; } 
         doc.setFontSize(14); doc.setTextColor(...redColor); doc.text("Detalhamento de Saídas", 14, finalY); 
-        doc.autoTable({ 
-            startY: finalY + 5, 
-            head: [['Data', 'Descrição', 'Categoria', 'Valor']], 
-            body: rowsSaidas, 
-            theme: 'grid', 
-            headStyles: { fillColor: redColor }, 
-            styles: { fontSize: 9 }, 
-            columnStyles: { 3: { halign: 'right', fontStyle: 'bold' } } 
-        }); 
+        doc.autoTable({ startY: finalY + 5, head: [['Data', 'Descrição', 'Categoria', 'Valor']], body: rowsSaidas, theme: 'grid', headStyles: { fillColor: redColor }, styles: { fontSize: 9 }, columnStyles: { 3: { halign: 'right', fontStyle: 'bold' } } }); 
     }
 
     doc.save(`Relatorio_Braseiro_${new Date().toISOString().split('T')[0]}.pdf`);
